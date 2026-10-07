@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: destello-sync-v2
+    runtime: node
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
