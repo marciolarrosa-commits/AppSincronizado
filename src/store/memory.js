@@ -8,6 +8,7 @@ function createMemoryStore(config) {
   const handlers = new Map();     // id -> Set<fn>
   const presence = new Map();     // id -> Map<instanceId, {count, exp}>
   const acks = new Map();         // `${id}:${ver}` -> {h, exp}
+  const settings = new Map();     // ajustes del operador (sin vencimiento mientras viva el proceso)
   const ttl = config.sessionTtlS * 1000;
   let sweeper = null;
 
@@ -31,6 +32,8 @@ function createMemoryStore(config) {
     },
     async close() { if (sweeper) clearInterval(sweeper); },
     async health() { return { ok: true, latencyMs: 0, kind: 'memory' }; },
+    async getSetting(key) { return settings.has(key) ? settings.get(key) : null; },
+    async setSetting(key, value) { settings.set(key, String(value)); },
 
     async createSession(id) {
       if (live(id)) return null;

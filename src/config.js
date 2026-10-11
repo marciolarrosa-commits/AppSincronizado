@@ -28,7 +28,7 @@ function loadConfig(env = process.env, overrides = {}) {
   let masterPassword = env.MASTER_PASSWORD || '';
   let masterPasswordGenerated = false;
   if (!masterPassword) {
-    if (production) throw new Error('Falta MASTER_PASSWORD (obligatoria con NODE_ENV=production).');
+    if (production) throw new Error('Falta MASTER_PASSWORD (obligatoria con NODE_ENV=production). En Render: servicio > Environment > agregar MASTER_PASSWORD (mínimo 12 caracteres) y volver a desplegar.');
     // Solo desarrollo: contraseña efímera, se imprime una vez al arrancar.
     masterPassword = crypto.randomBytes(9).toString('base64url');
     masterPasswordGenerated = true;
@@ -40,12 +40,16 @@ function loadConfig(env = process.env, overrides = {}) {
   const tokenSecret = env.TOKEN_SECRET ||
     Buffer.from(crypto.hkdfSync('sha256', masterPassword, 'destello-sync', 'token-secret-v1', 32));
 
+  const publicBaseUrl = (env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+  if (publicBaseUrl && !/^https?:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?$/.test(publicBaseUrl)) throw new Error('PUBLIC_BASE_URL inválida: debe ser solo origen, p. ej. https://appsincronizado.onrender.com (sin ruta ni espacios).');
+  if (production && publicBaseUrl && !publicBaseUrl.startsWith('https://')) throw new Error('PUBLIC_BASE_URL debe usar https:// en producción (los teléfonos necesitan WSS).');
+
   const cfg = {
     production,
     port: num(env, 'PORT', 10000, { min: 0, max: 65535 }),
     host: env.HOST || '0.0.0.0',
     listenBacklog: num(env, 'LISTEN_BACKLOG', 4096, { min: 128 }),   // cola de aceptación: clave ante reconexiones masivas
-    publicBaseUrl: (env.PUBLIC_BASE_URL || '').replace(/\/+$/, ''),
+    publicBaseUrl,
     allowedOrigins: list(env, 'ALLOWED_ORIGINS'),
     allowNoOrigin: bool(env, 'ALLOW_NO_ORIGIN', !production),
     trustProxyHops: num(env, 'TRUST_PROXY_HOPS', onRender ? 1 : 0, { min: 0, max: 5 }),
@@ -53,6 +57,12 @@ function loadConfig(env = process.env, overrides = {}) {
     logLevel: env.LOG_LEVEL || 'info',
     redisUrl: env.REDIS_URL || '',
     redisPrefix: env.REDIS_PREFIX || 'ds:',
+    // App «Flash» (micrófono + linterna, versión anterior). Convive con Destello·Sync V3: el operador la habilita desde /master y el valor se guarda
+    // en el almacenamiento. Esto es solo el estado INICIAL mientras el operador no lo haya cambiado.
+    flashDefaultEnabled: bool(env, 'FLASH_DEFAULT_ENABLED', false),
+    // App «Flash» (micrófono + linterna, V1/V2). Convive con Destello·Sync V3: el operador la habilita desde /master (se guarda en el almacenamiento).
+    // Este valor es solo el estado INICIAL cuando el operador nunca lo cambió.
+    flashDefaultEnabled: bool(env, 'FLASH_DEFAULT_ENABLED', false),
 
     masterPassword,
     masterPasswordGenerated,

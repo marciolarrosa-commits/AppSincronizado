@@ -170,6 +170,27 @@ ul.sessions li{display:flex;justify-content:space-between;align-items:center;pad
       </div>
     </section>
   </div>
+
+  <!-- 4) App Flash (micrófono + linterna): convive con las sesiones de arriba; el operador decide si el público puede entrar a ella -->
+  <div id="flashCard" class="card hidden">
+    <h2>App Flash (micrófono y linterna)</h2>
+    <p class="muted small" style="margin:0 0 12px">Es la aplicación anterior: cada teléfono hace destellar su flash al ritmo de la música que capta con su micrófono. Funciona aparte de las sesiones de arriba (no usa el control del operador). Mientras esté deshabilitada, su dirección <code>/flash</code> no abre. Habilitarla genera un QR propio, distinto del QR de la sesión.</p>
+    <div class="row">
+      <span id="flashState" class="pill">Flash: consultando…</span>
+      <button id="flashToggle" class="btn" type="button" disabled>Habilitar app Flash</button>
+    </div>
+    <div id="flashOn" class="row hidden" style="margin-top:16px;align-items:flex-start;gap:18px">
+      <div style="max-width:230px">
+        <div class="qr" id="flashQr"></div>
+        <div class="code" id="flashCode" style="text-align:center;background:#fff;border-radius:0 0 14px 14px;margin-top:-6px;padding-bottom:10px;font-size:24px">------</div>
+      </div>
+      <div style="flex:1;min-width:220px">
+        <p id="flashUrl" class="url"></p>
+        <div class="row"><button id="flashCopy" class="btn" type="button">Copiar enlace</button><button id="flashOpen" class="btn" type="button">Abrir app Flash</button><button id="flashNewCode" class="btn" type="button">Nuevo código</button></div>
+        <p class="muted small" style="margin:10px 0 0">Todos los teléfonos que escaneen este QR usan el mismo código de sesión Flash.</p>
+      </div>
+    </div>
+  </div>
 </div>
 <script src="/js/qrcode.js"></script>
 <script src="/js/pending.js"></script>

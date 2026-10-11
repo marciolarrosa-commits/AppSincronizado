@@ -1,4 +1,4 @@
-# Destello·Sync V3.1
+# Destello·Sync V3.2
 
 Sincroniza las pantallas de los teléfonos de un público: cada persona abre una web (sin instalar nada) escaneando un QR y un operador controla colores y
 efectos en tiempo real desde `/master`. WebSocket real (`ws`), estado autoritativo en el servidor, ejecución programada (`executeAt`) con reloj sincronizado,
@@ -7,14 +7,16 @@ reconexión automática y, opcionalmente, Redis/Valkey para varias instancias.
 > **Estado honesto**: probado y funcionando en una instancia y en 2 instancias + Redis (ver `docs/CARGA.md`). **No** está validado para 60 000 dispositivos:
 > ese es el objetivo de ingeniería, no una capacidad demostrada. Ver `docs/OPERACION_EVENTO_MASIVO.md`.
 
-## Rutas
+## Rutas (tabla completa y verificada contra el código: `docs/RUTAS.md`)
 
 | Ruta | Descripción |
 |---|---|
-| `GET /` | App del público. `/?s=CODIGO&mode=remote` abre la pantalla controlada por el Master (el QR apunta acá; formato V3.0 conservado). |
-| `GET /master` | Panel del operador (requiere contraseña). |
+| `GET /` | **Portada de Destello·Sync V3** con el botón «Abrir panel del operador». |
+| `GET /?s=CODIGO&mode=remote` | **Pantalla del participante** (el QR de la sesión apunta acá; formato V3.0 conservado). `/?mode=remote` = app instalada sin código. |
+| `GET /master` | Panel del operador (contraseña): crea sesiones, QR, colores y efectos, **interruptor de la app Flash**. |
+| `GET /flash` · `/?s=CODIGO` | **App Flash anterior** (micrófono + linterna). Solo responde si el operador la habilitó en `/master`; si no, `403`. Su QR propio lo genera el panel. |
 | `WS /ws` | Canal de tiempo real (protocolo en `docs/PROTOCOLO.md`). |
-| `POST /api/master/login`, `POST/GET /api/sessions`, `POST /api/sessions/:id/master-token`, `…/revoke` | API del operador (Bearer). |
+| `POST /api/master/login`, `POST/GET /api/sessions`, `POST /api/sessions/:id/master-token`, `…/revoke`, `GET/POST /api/admin/flash` | API del operador (Bearer). |
 | `GET /api/sessions/:id/status` | Público: solo `exists`. Con token de operador: estado y conteos. |
 | `GET /healthz` · `/readyz` · `/api/admin/status` · `/metrics` | Vivo · listo · detalle (operador) · Prometheus (token). |
 
@@ -31,15 +33,17 @@ Producción: `NODE_ENV=production MASTER_PASSWORD=<≥12 caracteres> npm start`.
 ## Pruebas
 
 ```bash
-npm test                  # 102 pruebas: efectos, plataforma/PWA, rastreador de ACK, funcionales, seguridad, WebSocket, compatibilidad, idempotencia, robustez, auditoría, distribución, generador de carga
+npm test                  # 113 pruebas (con Redis real; 17 se omiten sin REDIS_SERVER): navegación, efectos, plataforma/PWA, rastreador de ACK, funcionales, seguridad, WebSocket, compatibilidad, idempotencia, robustez, auditoría, distribución, generador de carga
 REDIS_SERVER=/ruta/a/redis-server npm test    # incluye distribución con 2 instancias + Redis REAL (si no, esas 6 se omiten y se informa)
 npm run check             # sintaxis de todo el JavaScript
-npm run test:browser      # 23 E2E en Chrome/Edge real, incluida la cobertura de pantalla con emulación móvil (puppeteer-core; CHROME_PATH opcional)
+npm run test:browser      # 24 E2E en Chrome/Edge real (incluye portada → panel → QR → participante y el interruptor Flash), con la cobertura de pantalla con emulación móvil (puppeteer-core; CHROME_PATH opcional)
 node tools/loadtest.js --spawn --clients 1000 --commands 5 --storm 1   # prueba de carga (ver docs/CARGA.md)
 ```
 
 ## Documentación
 
+* `docs/RUTAS.md` — todas las rutas HTTP/WS: método, autenticación, respuestas y errores.
+* `docs/INFORME_V3.2.md` — navegación corregida, convivencia con la app Flash, pruebas ejecutadas, publicación y plan en dispositivos.
 * `docs/ARQUITECTURA.md` — qué había, defectos corregidos, componentes, estado autoritativo, etapas de escalado.
 * `docs/PROTOCOLO.md` — mensajes, esquemas, códigos, sincronización de reloj.
 * `docs/CONFIGURACION.md` — todas las variables de entorno.

@@ -9,7 +9,7 @@
 | Backend | Un único `server.js` (~330 líneas), estado en `Map` en memoria. |
 | Tests | Ninguno. |
 | Puerto | `process.env.PORT` (correcto para Render). |
-| Páginas | `/` (app del público + modo remoto con `?s=CODIGO&mode=remote`), `/master`. QR generado en el navegador con una librería incluida. |
+| Páginas | `/` (**la app Flash anterior** —micrófono + linterna— con el cliente remoto de V3 incrustado y activado por `?s=CODIGO&mode=remote`), `/master`. QR generado en el navegador con una librería incluida. **Esta es la causa de que la raíz mostrara «El flash de cada celular…»**: `serveStatic` mapeaba `/` a `public/index.html`, y ese archivo ERA la app Flash. |
 
 Defectos reproducibles / verificados por lectura de código y corregidos:
 
@@ -53,6 +53,7 @@ flowchart LR
 * `src/protocol.js` — esquemas y validación estricta de cada mensaje.
 * `src/auth.js` — contraseña del operador, tokens HMAC con alcance a una sesión.
 * `src/store/*` — misma interfaz con dos implementaciones: **memoria** (una instancia) y **Redis** (varias).
+* `public/index.html` — **portada de V3** (V3.2). `public/flash.html` — app Flash anterior + cliente remoto de V3 (el archivo que antes era `index.html`, sin cambios de contenido). `public/flash-disabled.html` — respuesta `403` cuando el operador no habilitó Flash. Enrutado en `pickPage()` de `src/app.js`; tabla completa en `RUTAS.md`.
 * `public/js/effects.js` — motor de efectos puro (función del tiempo del servidor). `public/js/remote.js` — cliente del público. `public/js/master.js` — panel.
 
 ### Mecanismos de comunicación
@@ -92,3 +93,10 @@ El estado vigente sobrevive a reinicios solo con Redis; sin Redis la sesión se 
 * La difusión es el cuello de botella medido (≈ 80–100 µs por envío en Windows): se escala agregando instancias/procesos, no conexiones a una sola.
 
 Ver `PROTOCOLO.md`, `CONFIGURACION.md`, `OBSERVABILIDAD.md`, `SEGURIDAD.md`, `CARGA.md`, `DESPLIEGUE_RENDER.md`, `OPERACION_EVENTO_MASIVO.md`.
+
+## Convivencia de V3 y la app Flash (V3.2)
+
+* `/` = presentación de V3. `/master` = panel. El QR de una sesión V3 sigue siendo `/?s=CODIGO&mode=remote` y el servidor entrega el cliente remoto (`flash.html`) **sin redirecciones**.
+* La app Flash anterior vive en `/flash` (y en los QR antiguos `/?s=CODIGO`). **Solo responde si el operador la habilita** desde `/master` (`POST /api/admin/flash`); si no, `403`. El valor se guarda en el almacenamiento (`getSetting/setSetting` en los stores memoria y Redis) y cada instancia lo refresca con su sondeo de 5 s: **no hay consulta al almacenamiento por petición**.
+* El panel genera un QR **propio** de Flash (`/flash?s=CODIGO`, código aleatorio local) distinto del QR de la sesión V3.
+* Decisión de diseño: `flash.html` sigue siendo un archivo único (app Flash + cliente remoto) porque el cliente remoto ya funcionó en dos iPhone y separarlo implicaba reescribir CSS/JS compartido. Consecuencia: el interruptor controla las direcciones de entrada, no los bytes del archivo. Futuro posible: extraer un `participante.html` mínimo para que los teléfonos descarguen menos (hoy ≈ 164 KB sin gzip).

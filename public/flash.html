@@ -1,0 +1,2813 @@
+<!doctype html>
+<html lang="es">
+<head>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<!-- COBERTURA TOTAL: viewport-fit=cover extiende el documento bajo el notch / Dynamic Island / barras; theme-color se actualiza desde remote.js con el color vigente. -->
+<meta name="theme-color" content="#000000" />
+<meta name="color-scheme" content="dark" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Destello" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="icon" href="/icons/icon-192.png" type="image/png" sizes="192x192" />
+<script>
+  /* Se ejecuta ANTES del primer pintado: si el enlace es del modo remoto (QR), la interfaz de la app original ni se llega a mostrar. */
+  if (/[?&]mode=remote/.test(location.search)) document.documentElement.classList.add('remote-on');
+</script>
+<title>Destello·Sync — flash al ritmo de la música</title>
+<style>
+  :root {
+    --bg:        oklch(12% 0.006 95);
+    --surface:   oklch(18% 0.008 95);
+    --surface-2: oklch(24% 0.010 95);
+    --fg:        oklch(96% 0.004 95);
+    --muted:     oklch(66% 0.010 95);
+    --border:    oklch(30% 0.010 95);
+    --accent:      oklch(85% 0.19 98);
+    --accent-fg:   oklch(14% 0.02 95);
+    --success:   oklch(72% 0.16 148);
+    --success-fg: oklch(12% 0.03 148);
+    --warn:      oklch(80% 0.15 85);
+    --warn-fg:   oklch(16% 0.03 85);
+    --danger:    oklch(66% 0.20 25);
+
+    --font-display: 'Söhne', 'Avenir Next', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --font-body:    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-mono:    'JetBrains Mono', ui-monospace, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.55 var(--font-body);
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100dvh;
+  }
+  h1, h2 { font-family: var(--font-display); margin: 0; }
+  p { margin: 0; }
+  button { font-family: inherit; }
+  ul { margin: 0; padding: 0; list-style: none; }
+
+  .topbar {
+    padding: 20px clamp(20px, 6vw, 40px) 8px;
+    padding-top: max(20px, env(safe-area-inset-top));
+  }
+  .brand {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: 0.02em;
+    color: var(--muted);
+  }
+  .brand-accent { color: var(--muted); }
+
+  .file-warning {
+    background: color-mix(in oklch, var(--warn) 20%, var(--bg));
+    border-bottom: 1px solid var(--border);
+    color: var(--fg);
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 12px clamp(20px, 6vw, 40px);
+  }
+  .file-warning[hidden] { display: none; }
+
+  .stage {
+    flex: 1;
+    display: flex;
+    padding: 12px clamp(20px, 6vw, 40px) max(28px, env(safe-area-inset-bottom));
+  }
+
+  .view {
+    display: none;
+    flex-direction: column;
+    gap: 20px;
+    width: 100%;
+    max-width: 460px;
+    margin: 0 auto;
+  }
+  .view.active { display: flex; }
+
+  .eyebrow {
+    font: 600 12px/1 var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--muted);
+  }
+  .display {
+    font-size: clamp(30px, 7.5vw, 42px);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+  }
+  .h1 {
+    font-size: clamp(24px, 5.5vw, 30px);
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+    font-weight: 600;
+  }
+  .lead {
+    color: var(--muted);
+    font-size: 15.5px;
+    max-width: 42ch;
+  }
+
+  .signal-mark { position: relative; width: 46px; height: 46px; margin-bottom: 2px; }
+  .signal-core { position: absolute; inset: 16px; border-radius: 50%; background: var(--accent); }
+  .signal-ring {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    border: 1.5px solid var(--accent);
+    opacity: 0;
+    animation: signalPulse 2.6s ease-out infinite;
+  }
+  .signal-ring-2 { animation-delay: 1.3s; }
+  @keyframes signalPulse {
+    0%   { transform: scale(0.4); opacity: 0.5; }
+    80%  { opacity: 0; }
+    100% { transform: scale(1); opacity: 0; }
+  }
+
+  .how-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+  }
+  .how-list li {
+    font-size: 14.5px;
+    color: var(--muted);
+    display: flex;
+    gap: 8px;
+  }
+  .how-list li strong { color: var(--fg); font-weight: 600; }
+
+  .cta-row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  .btn {
+    appearance: none;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    padding: 14px 22px;
+    font-size: 15px;
+    font-weight: 550;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    min-height: 48px;
+    transition: transform 0.12s ease, opacity 0.12s ease;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn:disabled { opacity: 0.55; cursor: default; transform: none; }
+  .btn-primary { background: var(--accent); color: var(--accent-fg); }
+  .btn-secondary { background: var(--surface-2); color: var(--fg); border-color: var(--border); }
+  .btn-ghost { background: transparent; color: var(--muted); border: none; padding: 10px 4px; align-self: flex-start; }
+  .btn-ghost:hover { color: var(--fg); }
+  .btn-danger { background: transparent; color: var(--danger); border-color: var(--danger); }
+
+  .qr-card {
+    background: #ffffff;
+    border-radius: 18px;
+    padding: 22px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+  #qr-canvas { display: block; width: 200px; height: 200px; border-radius: 6px; overflow: hidden; }
+  .code-display {
+    font-family: var(--font-mono);
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: #14121a;
+  }
+  .qr-fallback-note {
+    font-size: 12.5px;
+    color: #6b6a76;
+    text-align: center;
+    max-width: 220px;
+  }
+
+  .join-existing-row { display: flex; gap: 8px; }
+  .join-existing-row input {
+    flex: 1;
+    min-width: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: var(--fg);
+    font: 600 15px/1 var(--font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .join-existing-row input:focus { outline: 2px solid var(--fg); outline-offset: 1px; }
+  .join-existing-row .btn { padding: 12px 18px; }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 13px; color: var(--muted); }
+  .field input {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: var(--fg);
+    font-size: 15px;
+  }
+  .field input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .permission-list { display: flex; flex-direction: column; gap: 12px; }
+  .permission-list li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    font-size: 14.5px;
+    color: var(--fg);
+  }
+  .permission-list svg { flex: none; width: 20px; height: 20px; stroke: var(--muted); }
+
+  .error-banner {
+    border: 1px solid var(--danger);
+    background: color-mix(in oklch, var(--danger) 14%, var(--surface));
+    color: var(--fg);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 14px;
+  }
+  .error-banner[hidden] { display: none; }
+
+  .field-error { color: var(--danger); font-size: 12.5px; }
+  .field-error[hidden] { display: none; }
+
+  .live-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .badge {
+    font: 600 11px/1 var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .badge-success { background: var(--success); color: var(--success-fg); border-color: transparent; }
+  .badge-warn { background: var(--warn); color: var(--warn-fg); border-color: transparent; }
+
+  .pulse-wrap {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 40px 0 24px;
+  }
+  .pulse-core {
+    width: 124px;
+    padding: 14px 18px;
+    background: #ffffff;
+    border-radius: 18px;
+    border: 2px solid var(--fg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    z-index: 2;
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 0%, transparent);
+    transition: transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 200ms ease-out;
+  }
+  .crest-img { width: 100%; height: auto; display: block; }
+  .sonar-ring {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 140px;
+    height: 140px;
+    margin: -70px 0 0 -70px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    opacity: 0.5;
+    pointer-events: none;
+    animation: sonarOut 900ms cubic-bezier(0.2, 0.6, 0.3, 1) forwards;
+  }
+  @keyframes sonarOut {
+    0%   { transform: scale(0.55); opacity: 0.55; }
+    100% { transform: scale(2.3);  opacity: 0; }
+  }
+
+  .bpm-readout { display: flex; align-items: baseline; justify-content: center; gap: 8px; }
+  .bpm-value { font: 600 44px/1 var(--font-mono); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+
+  .level-meter-block { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  .level-label { font: 600 11px/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .level-meter { position: relative; width: 100%; max-width: 280px; height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+
+  .sensitivity-row { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  .sensitivity-options { display: flex; gap: 4px; background: var(--surface-2); border-radius: 999px; padding: 4px; }
+  .sensitivity-btn {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font: 600 13px/1 var(--font-body);
+    padding: 8px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .sensitivity-btn.active { background: var(--fg); color: var(--bg); }
+
+  .metrics-panel { width: 100%; max-width: 300px; margin: 0 auto; }
+  .metrics-panel summary {
+    cursor: pointer;
+    font: 600 12px/1 var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    padding: 6px 0;
+  }
+  .metrics-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 0;
+    border-top: 1px solid var(--border);
+    margin-top: 6px;
+  }
+  .metrics-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--fg); }
+  .metrics-row span:last-child { font-family: var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .level-fill { position: absolute; inset: 0; width: 0%; background: var(--accent); border-radius: 999px; }
+  .level-threshold { position: absolute; top: -3px; bottom: -3px; width: 2px; left: 0%; background: var(--fg); opacity: 0.65; }
+  .bpm-unit { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+
+  .visually-hidden {
+    position: absolute;
+    top: 0; left: 0;
+    width: 1px; height: 1px;
+    opacity: 0.01;
+    overflow: hidden;
+  }
+  /* ============ MODO REMOTO (superficie lumínica) ============
+     Capas, de abajo hacia arriba:
+       1. html/body  -> mismo color que la capa lumínica (rebote de scroll, áreas bajo barras translúcidas)  [remote.js]
+       2. #remote-light -> CAPA LUMÍNICA PRINCIPAL: cubre TODO el viewport (con 1 px de sangrado para evitar líneas por DPR fraccionario)
+       3. #remote-ui  -> interfaz de incorporación / panel de diagnóstico (oculta en modo espectáculo)
+       4. #remote-banner -> pastilla mínima de desconexión (solo tras >10 s sin conexión en modo espectáculo)
+     Las áreas seguras (env(safe-area-inset-*)) se aplican SOLO a la interfaz, nunca al fondo lumínico. */
+  html.remote-on, html.remote-on body {
+    margin: 0; padding: 0; width: 100%; height: 100%; min-height: 0; overflow: hidden;
+    overscroll-behavior: none; background: #000; color-scheme: dark;
+  }
+  html.remote-on body { display: block; }
+  html.remote-on .topbar, html.remote-on .file-warning, html.remote-on main.stage, html.remote-on .screen-flash { display: none !important; }
+  html.show-mode { cursor: none; }
+  .remote-stage {
+    position: fixed; inset: 0; z-index: 10000; display: none; margin: 0; padding: 0;
+    background: #000; color: #fff; overflow: hidden;
+    touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+  }
+  .remote-stage.active { display: block; }
+  .remote-light {
+    position: fixed; top: -1px; right: -1px; bottom: -1px; left: -1px; z-index: 0;
+    min-height: 100vh; min-height: calc(100lvh + 2px);        /* con la barra del navegador retraída el viewport "grande" es mayor: sin franjas */
+    background: #000; contain: strict;
+  }
+  .remote-ui {
+    position: fixed; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center;
+    padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+    overflow-y: auto; touch-action: manipulation; -webkit-user-select: text; user-select: text;
+  }
+  .remote-ui[hidden], .remote-banner[hidden], .remote-debug[hidden], .remote-ui [hidden] { display: none !important; }
+  .remote-ui.panel { background: rgba(0, 0, 0, .78); }
+  .remote-status { display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap;
+    font: 600 12px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .08em; color: rgba(255,255,255,.72); }
+  .remote-status .connected { color: #8cffb0; }
+  .remote-label { font: 600 clamp(18px,5vw,30px)/1.1 var(--font-display); opacity: .85; margin: 0; }
+  .remote-advice { max-width: 34ch; font-size: 14px; line-height: 1.45; color: rgba(255,255,255,.78); margin: 0; }
+  .remote-diag { max-width: 40ch; white-space: pre-wrap; text-align: left; font: 12px/1.5 var(--font-mono); color: rgba(255,255,255,.7); margin: 0; }
+  .remote-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .remote-ui button, .remote-ui input { font: inherit; }
+  .remote-ui button { border: 1px solid rgba(255,255,255,.28); background: rgba(255,255,255,.08); color: #fff; border-radius: 999px; padding: 13px 20px; font-weight: 650; min-height: 48px; }
+  .remote-ui button.primary { background: var(--accent); color: #111; border-color: transparent; font-size: 17px; padding: 16px 28px; }
+  .remote-ui input { background: rgba(255,255,255,.1); color: #fff; border: 1px solid rgba(255,255,255,.3); border-radius: 12px; padding: 13px 14px; font-size: 20px; letter-spacing: .18em; text-transform: uppercase; text-align: center; width: 11ch; }
+  .remote-code-error { color: #ffb3b3; font-size: 13px; margin: 0; }
+  .remote-banner { position: fixed; top: max(8px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 3; max-width: calc(100% - 24px);
+    background: rgba(160,20,20,.94); color: #fff; border-radius: 999px; padding: 8px 14px; font-weight: 650; font-size: 13px; text-align: center; }
+  .remote-banner:not(.compact) { top: auto; bottom: max(20px, env(safe-area-inset-bottom)); border-radius: 14px; font-size: 15px; padding: 14px 16px; }
+  .remote-debug { position: fixed; left: 8px; bottom: max(6px, env(safe-area-inset-bottom)); font: 11px/1.2 var(--font-mono); color: rgba(255,255,255,.6); z-index: 3; }
+
+  .screen-flash {
+    position: fixed;
+    inset: 0;
+    background: #ffffff;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 60ms linear;
+    z-index: 9999;
+  }
+  .screen-flash.flash-on { opacity: 0.92; }
+  /* Dim complement to the LED torch — never the full white-out above.
+     The LED lights backward (away from the user's face); this brightens
+     the screen forward at the same instant, which reads much better in a
+     crowd and gives a visible fallback if one hardware torch pulse drops. */
+  .screen-flash.flash-on-dim { opacity: 0.16; }
+
+  @media (min-width: 640px) {
+    .stage { align-items: center; }
+  }
+</style>
+</head>
+<body>
+
+  <header class="topbar" data-od-id="topbar">
+    <span class="brand">Destello<span class="brand-accent">·</span>Sync</span>
+  </header>
+
+  <div class="file-warning" id="file-protocol-warning" data-od-id="file-protocol-warning" hidden>
+    Estás abriendo este archivo directamente desde tu computadora (una dirección "file://"), no desde una página web. Por eso el QR no hace nada al escanearlo: apunta a un archivo de tu disco, no a algo que otro celular pueda abrir. Subí este archivo a una dirección web real (por ejemplo, publicándolo desde Open Design o subiéndolo a un hosting) y volvé a abrirlo desde ahí para que el QR funcione entre varios teléfonos.
+  </div>
+
+  <main class="stage" data-od-id="main-stage">
+
+    <section class="view active" id="view-landing" data-od-id="view-landing">
+      <div class="signal-mark" aria-hidden="true" data-od-id="signal-mark">
+        <span class="signal-core"></span>
+        <span class="signal-ring"></span>
+        <span class="signal-ring signal-ring-2"></span>
+      </div>
+      <p class="eyebrow">Luces sincronizadas por sonido</p>
+      <h1 class="display">El flash de cada celular, al compás de la música del lugar</h1>
+      <p class="lead">Creá una sesión y compartí el código QR. Cada teléfono que lo escanea empieza a destellar según el ritmo que capta con su propio micrófono — sin conexión entre ellos, sin servidor de por medio.</p>
+      <div class="cta-row">
+        <button class="btn btn-primary" id="btn-create" data-od-id="btn-create-session">Crear sesión</button>
+      </div>
+      <ul class="how-list" data-od-id="how-it-works">
+        <li><strong>1.</strong> Creás la sesión y mostrás el QR en tu pantalla.</li>
+        <li><strong>2.</strong> Cada invitado lo escanea con la cámara de su celular.</li>
+        <li><strong>3.</strong> Todos activan micrófono y flash: el destello sigue el ritmo real del ambiente, en cada teléfono por igual.</li>
+      </ul>
+      <div class="field" data-od-id="join-existing">
+        <label for="input-join-code">¿Ya tenés un código de sesión?</label>
+        <div class="join-existing-row">
+          <input id="input-join-code" type="text" maxlength="6" placeholder="Ej. AB3F9K" data-od-id="input-join-code" />
+          <button class="btn btn-secondary" id="btn-join-code" data-od-id="btn-join-code">Unirme</button>
+        </div>
+        <p class="field-error" id="join-code-error" hidden data-od-id="join-code-error">Código inválido — 6 caracteres (letras y números, sin I/O/0/1).</p>
+      </div>
+    </section>
+
+    <section class="view" id="view-share" data-od-id="view-share">
+      <p class="eyebrow">Sesión creada</p>
+      <h2 class="h1">Compartí este código</h2>
+      <div class="qr-card" data-od-id="qr-card">
+        <div id="qr-canvas" data-od-id="qr-canvas"></div>
+        <p class="qr-fallback-note" id="qr-fallback-note" hidden>No se pudo generar el código QR en este momento. Usá el enlace de abajo para invitar.</p>
+        <p class="code-display" id="code-display">------</p>
+      </div>
+      <div class="field">
+        <label for="input-session-name">Nombre de la sesión (opcional, solo para mostrar en pantalla)</label>
+        <input id="input-session-name" type="text" maxlength="40" placeholder="ej. Cumple de Rocío" data-od-id="input-session-name" />
+      </div>
+      <div class="cta-row">
+        <button class="btn btn-secondary" id="btn-copy-link" data-od-id="btn-copy-link">Copiar enlace</button>
+        <button class="btn btn-primary" id="btn-join-own" data-od-id="btn-join-own">Activar en este teléfono</button>
+      </div>
+      <button class="btn btn-ghost" id="btn-back-landing" data-od-id="btn-back-landing">Volver</button>
+    </section>
+
+    <section class="view" id="view-activate" data-od-id="view-activate">
+      <p class="eyebrow" id="activate-code-label">Sesión ------</p>
+      <h2 class="h1">Activar micrófono y flash</h2>
+      <p class="lead">Tu teléfono va a escuchar la música ambiente con el micrófono y va a hacer titilar su propio flash al ritmo que detecta. El audio nunca se envía a ningún servidor: se procesa solo en tu navegador.</p>
+      <ul class="permission-list" data-od-id="permission-list">
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/></svg>
+          Micrófono — para escuchar el ritmo ambiente
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg>
+          Cámara — para controlar el flash
+        </li>
+      </ul>
+      <div class="error-banner" id="permission-error" hidden></div>
+      <div class="cta-row">
+        <button class="btn btn-primary" id="btn-activate" data-od-id="btn-activate">Activar</button>
+      </div>
+      <button class="btn btn-ghost" id="btn-back-from-activate" data-od-id="btn-back-from-activate">Volver</button>
+    </section>
+
+    <section class="view" id="view-live" data-od-id="view-live">
+      <div class="live-top">
+        <span class="eyebrow" id="live-code-label">Sesión ------</span>
+        <span class="badge" id="torch-badge" data-od-id="torch-badge">—</span>
+      </div>
+      <div class="pulse-wrap" id="pulse-wrap" data-od-id="pulse-visual">
+        <div class="pulse-core" id="pulse-core" data-od-id="club-crest-plate">
+          <img class="crest-img" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAG8AAACVCAMAAABhElQtAAAAq1BMVEUAAAD/////5gD/7wD/6wDJtgD/6QAyMjKShgB9dAB2bQB8dQDRwQD/8QC4qABqZAD/9QDw8PD29vb/+gDZyQB1dXUlJSUbFwASDwDq6upfX1+QkJArJwAVEgD14gAfHABKSko9PT3T09PGxsbg4OC6urqEhIQ3MQCFegDj0QAKCABWVlYZGRmuogCpmwBMRABgVwBWTQBra2uurq4kIQA+OQCikgDp2gCjo6N5vcRFAAAHnklEQVR4nO2bCZOiOhCAA4mILkFUxlu8FZjxmhll/v8ve51wmCAeuMPU7j5TteU0dPKRpLsDW91Ieah1e/XHOqKHes0naNz9OV53jBB6fWiGj/AaE8Ta+Id49RAHwMZP8LqvKG69/MDcPAEHwNx7mJfXbSGxTfICc/KmKN3mRfI+znAILQrjNV4ycAi9FMSbtTJxCJWnOXizOxWnvQs01t7v3cUZxKXZHTY2f79C44t6B7G+GPMlKvevKzc+rs0tmeMNw5n3y4CKlCf9S3vQ/ci2ksxJLi4t1awfksqC9qS/mHaFCNWYzxYvb3fDwva2XMzm4iDd6WI5SW6XU+qtyXjce4HWG48nl+zxVrsySJpXdHvynrxv4Q2HsjxI3f9EV++n1W/yqhVZXo8k0TdT469lWd/l5JklWXZcefxmWx7fk9WNFP8WrxM40pIcmoZ0/2jp8vjNlSiuNM/PxdtatCbKG+xIA9pE4q9UfBTlKrUO9/J2bsWtlAgxKq6r15Bfdd1KxdPwxgV5iwYgurqqOjqI7gBt4dddY81zdV2HTa+BXLE1UgL5eLaLGbxVqUkpUVVCadOASe0CkDVVxZhaG7BaF1sYq0y2nCpCow3cBlnDtOltYeWNqDvIKSPL5sFqEBiejRDZ6MZiooqDLRd9g3KZRia1DUh4P9rSCubdiZNho9n7t/JYDyfZgp3D+p8s9shua6cdKzGgs4/FA1PXbNmCr/EQ8DTVScStA6LA+4WZ/Evkgfo2kZm6lvKQa7y9RpyAkMRCdYw9QrTkvkGwhwULJYR4GCceUiUkcIiWzPcm79i0R6hkJTHEoyY6eFbi8lStoIpqxS7mWt4BbWgyIRN6Do2m5CFXecGGDxMv6IDP1DfjCek288WVHU/IMDuIbXLsoWEs0oO7eDD0Z7SQezCYHQy1iwynChPawb9aaAkdsD8fVP1qeHsFCzjYh7+s7SCmV2/xdqm4adZkOWUFg5Ssb2TZ3sryGc90pJPGD2T+qimfG3pTdmnDlh9HS/HTvGFgSV56sAIpbh+pzDeodG6sVCqF2aqVitsCbzRqt/0dJSbqdIYwyZHv+xCnIW6DPEKdNsi+TZyD3+mMhmjY7nTQVgWvGA6Hnz4aDUGuUIjbw/YInvETeoFj0m2n3f4cZfD2nufZAfitbdsemJ7r2bYBnhuAbO+QvwbZhjADP15pgFYG+wMCC1wNNj6qsdthdy+ART+G6lrAht1m8NDItqK4qXGzqmphINSYe/G15HFVI6FjdkqWFsqYr+nWo1H3gBtoRYvCsGWc1lTevyOPu0nkaxu8gxqf1fuAy05sMq7D1b346c1QPd7hgR2qiydzyl5MHnhPMgMIcXMvHgOIxTmmfjJ5g6hS3GTPgyULTfECWBz1FPggTmMi8F2sYk3gl4gGV05x24FTTzhWagS6y3Fb5tUINV2NJk+kU6ybFCdBwqZO1aYk0cfYrjo0cbkqxmsd02T+a6pVS1SK2zJvrbnMTpMJecGO7Xsct4cWO+83NNk/9mQrw0qmq1bZ60AyIcLsUifigso8g29FuxStyMDgzrtN4nTYsxbzo1i3SeL2IewVRYh9idvlXnyzknid2G5X0g/4e8SP5FGo58deHEXAdtx9IHcXz/k/5vvhyfsrebvaqQkn2UG4LLrvPlt9dUH9nGdbNG7iSa43k8uWeOAagrpw8LqCuvxdleZFJwKPy8K7Dg/MYSPil2aJJNep8Hi/BHX5faAgHn3y/lQe/sfn9+Q9eU/ek/fkPXn/R96/fr7/6/N78p68J+/v5ckJIEXzJmgiyUXzXtGrJBfNe0dy9k7RvCXq/yjvAy1+lLdAsx/lTZGc8Fgwr9VAiuQQBfPGClIkgymY9wU8KaWzYN4UeF0xhhbLGzdYPqbo8cXyljz/U1zQYnlzzmsIC1oojyWIs/zWrx/ifUQ85Yd4Ssw7uWCRvK+E100O+QK/V1r1hHeaYIHz49OLePXYRIub36Qh8JT4FCxuflHedZzv3SuYFyehx7x6wbxGihetaFG8JIv9lD//UiBvqZzzGuPCeK9KBk+pw5uMgb+Zx/Jzyo1MnjJHaOjhb+Vho4PexCR3qf5h9oZ8m3wjDxsQx6TMfLneAoCdEv02HjXTuHR9x7zFskK+h6exTJFyqswsXU/CrHTnkG/gEZYweVbzdV6/8sJyTPBv8zBLE1mejZ5RL8OKfo5U+y2exrOOMio+supz5mWWtGr9Bq/JMromWRWC2fVAS+hkPs6rMJ1+5sgX6o/AMcQ8mZw86Nm6UGd0qd6pLn3X5+TBd/qlSr3L9VUfj/P8y6VBV+q5hHKxfLzllTLEq/Vjs3HMo/fzxlcrxG7Uqy3CN9MKDnMVL/E0QnGYHNa6UWV1sz5uEVaO7dYe5emS5zwNY3sdptW836x+u6Mer/7V45llA91m6YIpHtZsnSegvb1/3VE+el/9X3fW42/E+41jSTzqHHlOXvl9dl+98d31ho0Zf+kfHsV0QDPM6e5P7y6MzVW/OV2i87bMUd2Yuz613pfrz1r9nCW/+et9xTkuC6/3VYT/X2jlWsmHeUojjOW9B7o+WG/PIuv5u0JxPOU9X5Xvb/OUB3HKfysWybIaLdCwAAAAAElFTkSuQmCC" alt="Escudo de Peñarol" />
+        </div>
+      </div>
+      <div class="bpm-readout" data-od-id="bpm-readout">
+        <span class="bpm-value" id="bpm-value">—</span>
+        <span class="bpm-unit">bpm estimado</span>
+      </div>
+      <div class="level-meter-block" data-od-id="level-meter-block">
+        <span class="level-label" id="level-label">Nivel de audio captado</span>
+        <div class="level-meter">
+          <div class="level-fill" id="level-fill"></div>
+          <div class="level-threshold" id="level-threshold"></div>
+        </div>
+      </div>
+      <div class="sensitivity-row" data-od-id="sensitivity-row">
+        <span class="level-label">Sensibilidad del micrófono</span>
+        <div class="sensitivity-options" role="radiogroup" aria-label="Sensibilidad del micrófono">
+          <button type="button" class="sensitivity-btn" data-sensitivity="low" data-od-id="sensitivity-low">Baja</button>
+          <button type="button" class="sensitivity-btn active" data-sensitivity="normal" data-od-id="sensitivity-normal">Normal</button>
+          <button type="button" class="sensitivity-btn" data-sensitivity="high" data-od-id="sensitivity-high">Alta</button>
+        </div>
+      </div>
+
+      <details class="metrics-panel" data-od-id="metrics-panel">
+        <summary>Métricas de rendimiento</summary>
+        <div class="metrics-grid">
+          <div class="metrics-row"><span>Latencia media del flash</span><span id="metric-latency">—</span></div>
+          <div class="metrics-row"><span>Golpes detectados</span><span id="metric-beats">0</span></div>
+          <div class="metrics-row"><span>Pulsos predichos (sin confirmar)</span><span id="metric-predicted">0</span></div>
+          <div class="metrics-row"><span>Estabilidad de tempo</span><span id="metric-stability">—</span></div>
+          <div class="metrics-row"><span>Ajuste automático (calibración)</span><span id="metric-auto-adjust">—</span></div>
+        </div>
+        <button type="button" class="btn btn-ghost" id="btn-copy-metrics" data-od-id="btn-copy-metrics">Copiar métricas</button>
+      </details>
+
+      <details class="metrics-panel" data-od-id="diagnostics-panel">
+        <summary>Diagnóstico del dispositivo</summary>
+        <div class="metrics-grid">
+          <div class="metrics-row"><span>Cámara activa</span><span id="diag-camera">—</span></div>
+          <div class="metrics-row"><span>getUserMedia</span><span id="diag-getusermedia">—</span></div>
+          <div class="metrics-row"><span>MediaStreamTrack</span><span id="diag-mediastreamtrack">—</span></div>
+          <div class="metrics-row"><span>getCapabilities()</span><span id="diag-capabilities">—</span></div>
+          <div class="metrics-row"><span>Torch reportado por el navegador</span><span id="diag-torch-reported">—</span></div>
+          <div class="metrics-row"><span>Torch confirmado (prueba real)</span><span id="diag-torch-real">—</span></div>
+          <div class="metrics-row"><span>Flash</span><span id="diag-flash-status">—</span></div>
+          <div class="metrics-row"><span>Motivo (si es pantalla)</span><span id="diag-flash-reason">—</span></div>
+          <div class="metrics-row"><span>Wake Lock</span><span id="diag-wakelock">—</span></div>
+          <div class="metrics-row"><span>Vibración</span><span id="diag-vibration">—</span></div>
+          <div class="metrics-row"><span>AudioContext</span><span id="diag-audiocontext">—</span></div>
+        </div>
+        <button type="button" class="btn btn-ghost" id="btn-copy-diagnostics" data-od-id="btn-copy-diagnostics">Copiar diagnóstico</button>
+      </details>
+
+      <details class="metrics-panel" data-od-id="detector-panel">
+        <summary>Diagnóstico del detector de beats</summary>
+        <div class="metrics-grid">
+          <div class="metrics-row"><span>Sample rate / llamadas por seg.</span><span id="det-sample-rate">—</span></div>
+          <div class="metrics-row"><span>Frames procesados</span><span id="det-frames-processed">0</span></div>
+          <div class="metrics-row"><span>Cruces de umbral — banda ancha</span><span id="det-broad-crossings">0</span></div>
+          <div class="metrics-row"><span>Cruces de umbral — banda</span><span id="det-band-crossings">0</span></div>
+          <div class="metrics-row"><span>Rechazados por gate absoluto (experimental)</span><span id="det-absolute-gate-rejected">0</span></div>
+          <div class="metrics-row"><span>Candidatos detectados</span><span id="det-candidates">0</span></div>
+          <div class="metrics-row"><span>Rechazados por refractario (detector)</span><span id="det-refractory-rejected">0</span></div>
+          <div class="metrics-row"><span>Confirmados por el detector</span><span id="det-confirmed">0</span></div>
+          <div class="metrics-row"><span>Rechazados por dedup de flash</span><span id="det-flash-dedup-rejected">0</span></div>
+          <div class="metrics-row"><span>Rechazados por consenso de mediana</span><span id="det-consensus-rejected">0</span></div>
+          <div class="metrics-row"><span>Aceptados como REAL (flash)</span><span id="det-accepted">0</span></div>
+          <div class="metrics-row"><span>Flux banda — media / máx / desv.</span><span id="det-band-flux-stats">—</span></div>
+          <div class="metrics-row"><span>Energía banda ancha — media / máx / desv.</span><span id="det-broad-energy-stats">—</span></div>
+        </div>
+        <div class="metrics-row" style="flex-direction:column; align-items:flex-start; gap:4px; margin-top:6px;">
+          <span>Histograma de intervalos entre candidatos (ms)</span>
+          <span id="det-interval-histogram" style="font-family:var(--font-mono); font-size:12px; color:var(--muted); white-space:pre-line;">—</span>
+        </div>
+        <div class="metrics-row" style="flex-direction:column; align-items:flex-start; gap:4px; margin-top:6px;">
+          <span>REAL aceptados (candidato / t / Δ / BPM instantáneo / canal)</span>
+          <span id="det-accepted-real" style="font-family:var(--font-mono); font-size:11px; color:var(--muted); white-space:pre-line; max-height:220px; overflow-y:auto; display:block;">—</span>
+        </div>
+        <div class="metrics-row" style="flex-direction:column; align-items:flex-start; gap:4px; margin-top:6px;">
+          <span>Bloqueos de tempo (t desde inicio / intervalos / BPM / desviación%)</span>
+          <span id="det-tempo-lock-events" style="font-family:var(--font-mono); font-size:12px; color:var(--muted); white-space:pre-line;">—</span>
+        </div>
+        <div class="metrics-row" style="flex-direction:column; align-items:flex-start; gap:4px; margin-top:6px;">
+          <span>Rastro de candidatos (t / canal / energía / flux / Δ intervalo)</span>
+          <span id="det-candidate-trace" style="font-family:var(--font-mono); font-size:11px; color:var(--muted); white-space:pre-line; max-height:180px; overflow-y:auto; display:block;">—</span>
+        </div>
+        <div class="metrics-row" style="flex-direction:column; align-items:flex-start; gap:4px; margin-top:6px;">
+          <span>Transiciones del latch (t / canal / dirección / valor / on / off)</span>
+          <span id="det-latch-trace" style="font-family:var(--font-mono); font-size:11px; color:var(--muted); white-space:pre-line; max-height:180px; overflow-y:auto; display:block;">—</span>
+        </div>
+        <div class="metrics-row" style="flex-direction:column; align-items:flex-start; gap:4px; margin-top:6px;">
+          <span>Destino final en registerBeat (t / candidato / resultado)</span>
+          <span id="det-pipeline-outcomes" style="font-family:var(--font-mono); font-size:11px; color:var(--muted); white-space:pre-line; max-height:180px; overflow-y:auto; display:block;">—</span>
+        </div>
+        <button type="button" class="btn btn-ghost" id="btn-copy-detector-stats" data-od-id="btn-copy-detector-stats">Copiar diagnóstico del detector</button>
+      </details>
+
+      <div class="cta-row">
+        <button class="btn btn-secondary" id="btn-invite-more" data-od-id="btn-invite-more">Invitar más celulares</button>
+        <button class="btn btn-danger" id="btn-stop" data-od-id="btn-stop">Detener</button>
+      </div>
+    </section>
+
+    <section class="view" id="view-ended" data-od-id="view-ended">
+      <p class="eyebrow">Sesión finalizada</p>
+      <h1 class="display">Gracias por sumarte</h1>
+      <p class="lead">Ya podés cerrar esta pestaña.</p>
+    </section>
+
+  </main>
+
+  <section id="remote-stage" class="remote-stage" aria-live="polite">
+    <!-- CAPA LUMÍNICA PRINCIPAL: aquí (y solo aquí) se pinta el color/efecto ordenado por el Master -->
+    <div id="remote-light" class="remote-light" aria-hidden="true"></div>
+    <!-- INTERFAZ de incorporación y panel de diagnóstico: oculta (hidden) en modo espectáculo -->
+    <div id="remote-ui" class="remote-ui">
+      <div class="remote-status"><span id="remote-session">SESIÓN ------</span><span id="remote-connection">● CONECTANDO</span></div>
+      <p id="remote-label" class="remote-label">Esperando al show</p>
+      <form id="remote-join-form" class="remote-join-form" hidden autocomplete="off">
+        <p class="remote-advice">Escribí el código de la sesión (está debajo del QR de la pantalla).</p>
+        <p><input id="remote-code" type="text" maxlength="6" inputmode="text" autocapitalize="characters" spellcheck="false" placeholder="AB3F9K" aria-label="Código de sesión" /></p>
+        <p id="remote-code-error" class="remote-code-error" hidden>Código inválido: 6 caracteres (letras y números, sin I, O, 0, 1, L).</p>
+        <div class="remote-actions"><button type="submit" class="primary">Entrar</button></div>
+      </form>
+      <p id="remote-advice" class="remote-advice"></p>
+      <div class="remote-actions">
+        <button id="remote-enter" type="button" class="primary">Entrar al espectáculo</button>
+        <button id="remote-back" type="button" class="primary" hidden>Volver al espectáculo</button>
+        <button id="remote-fullscreen" type="button">Pantalla completa</button>
+        <button id="remote-effects" type="button">Efectos: activados</button>
+        <button id="remote-exit" type="button">Salir</button>
+      </div>
+      <pre id="remote-diag" class="remote-diag" hidden></pre>
+    </div>
+    <div id="remote-banner" class="remote-banner" role="status" hidden><span id="remote-banner-text"></span></div>
+    <div id="remote-debug" class="remote-debug" hidden></div>
+  </section>
+
+  </main>
+
+  <video id="hidden-video" class="visually-hidden" autoplay muted playsinline></video>
+  <div id="screen-flash" class="screen-flash"></div>
+
+  <!-- QRCode.js (davidshimjs, MIT) vendored inline so it works fully offline, no CDN dependency -->
+  <script>
+var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this.parsedData=[];for(var b=[],d=0,e=this.data.length;e>d;d++){var f=this.data.charCodeAt(d);f>65536?(b[0]=240|(1835008&f)>>>18,b[1]=128|(258048&f)>>>12,b[2]=128|(4032&f)>>>6,b[3]=128|63&f):f>2048?(b[0]=224|(61440&f)>>>12,b[1]=128|(4032&f)>>>6,b[2]=128|63&f):f>128?(b[0]=192|(1984&f)>>>6,b[1]=128|63&f):b[0]=f,this.parsedData=this.parsedData.concat(b)}this.parsedData.length!=this.data.length&&(this.parsedData.unshift(191),this.parsedData.unshift(187),this.parsedData.unshift(239))}function b(a,b){this.typeNumber=a,this.errorCorrectLevel=b,this.modules=null,this.moduleCount=0,this.dataCache=null,this.dataList=[]}function i(a,b){if(void 0==a.length)throw new Error(a.length+"/"+b);for(var c=0;c<a.length&&0==a[c];)c++;this.num=new Array(a.length-c+b);for(var d=0;d<a.length-c;d++)this.num[d]=a[d+c]}function j(a,b){this.totalCount=a,this.dataCount=b}function k(){this.buffer=[],this.length=0}function m(){return"undefined"!=typeof CanvasRenderingContext2D}function n(){var a=!1,b=navigator.userAgent;return/android/i.test(b)&&(a=!0,aMat=b.toString().match(/android ([0-9]\.[0-9])/i),aMat&&aMat[1]&&(a=parseFloat(aMat[1]))),a}function r(a,b){for(var c=1,e=s(a),f=0,g=l.length;g>=f;f++){var h=0;switch(b){case d.L:h=l[f][0];break;case d.M:h=l[f][1];break;case d.Q:h=l[f][2];break;case d.H:h=l[f][3]}if(h>=e)break;c++}if(c>l.length)throw new Error("Too long data");return c}function s(a){var b=encodeURI(a).toString().replace(/\%[0-9a-fA-F]{2}/g,"a");return b.length+(b.length!=a?3:0)}a.prototype={getLength:function(){return this.parsedData.length},write:function(a){for(var b=0,c=this.parsedData.length;c>b;b++)a.put(this.parsedData[b],8)}},b.prototype={addData:function(b){var c=new a(b);this.dataList.push(c),this.dataCache=null},isDark:function(a,b){if(0>a||this.moduleCount<=a||0>b||this.moduleCount<=b)throw new Error(a+","+b);return this.modules[a][b]},getModuleCount:function(){return this.moduleCount},make:function(){this.makeImpl(!1,this.getBestMaskPattern())},makeImpl:function(a,c){this.moduleCount=4*this.typeNumber+17,this.modules=new Array(this.moduleCount);for(var d=0;d<this.moduleCount;d++){this.modules[d]=new Array(this.moduleCount);for(var e=0;e<this.moduleCount;e++)this.modules[d][e]=null}this.setupPositionProbePattern(0,0),this.setupPositionProbePattern(this.moduleCount-7,0),this.setupPositionProbePattern(0,this.moduleCount-7),this.setupPositionAdjustPattern(),this.setupTimingPattern(),this.setupTypeInfo(a,c),this.typeNumber>=7&&this.setupTypeNumber(a),null==this.dataCache&&(this.dataCache=b.createData(this.typeNumber,this.errorCorrectLevel,this.dataList)),this.mapData(this.dataCache,c)},setupPositionProbePattern:function(a,b){for(var c=-1;7>=c;c++)if(!(-1>=a+c||this.moduleCount<=a+c))for(var d=-1;7>=d;d++)-1>=b+d||this.moduleCount<=b+d||(this.modules[a+c][b+d]=c>=0&&6>=c&&(0==d||6==d)||d>=0&&6>=d&&(0==c||6==c)||c>=2&&4>=c&&d>=2&&4>=d?!0:!1)},getBestMaskPattern:function(){for(var a=0,b=0,c=0;8>c;c++){this.makeImpl(!0,c);var d=f.getLostPoint(this);(0==c||a>d)&&(a=d,b=c)}return b},createMovieClip:function(a,b,c){var d=a.createEmptyMovieClip(b,c),e=1;this.make();for(var f=0;f<this.modules.length;f++)for(var g=f*e,h=0;h<this.modules[f].length;h++){var i=h*e,j=this.modules[f][h];j&&(d.beginFill(0,100),d.moveTo(i,g),d.lineTo(i+e,g),d.lineTo(i+e,g+e),d.lineTo(i,g+e),d.endFill())}return d},setupTimingPattern:function(){for(var a=8;a<this.moduleCount-8;a++)null==this.modules[a][6]&&(this.modules[a][6]=0==a%2);for(var b=8;b<this.moduleCount-8;b++)null==this.modules[6][b]&&(this.modules[6][b]=0==b%2)},setupPositionAdjustPattern:function(){for(var a=f.getPatternPosition(this.typeNumber),b=0;b<a.length;b++)for(var c=0;c<a.length;c++){var d=a[b],e=a[c];if(null==this.modules[d][e])for(var g=-2;2>=g;g++)for(var h=-2;2>=h;h++)this.modules[d+g][e+h]=-2==g||2==g||-2==h||2==h||0==g&&0==h?!0:!1}},setupTypeNumber:function(a){for(var b=f.getBCHTypeNumber(this.typeNumber),c=0;18>c;c++){var d=!a&&1==(1&b>>c);this.modules[Math.floor(c/3)][c%3+this.moduleCount-8-3]=d}for(var c=0;18>c;c++){var d=!a&&1==(1&b>>c);this.modules[c%3+this.moduleCount-8-3][Math.floor(c/3)]=d}},setupTypeInfo:function(a,b){for(var c=this.errorCorrectLevel<<3|b,d=f.getBCHTypeInfo(c),e=0;15>e;e++){var g=!a&&1==(1&d>>e);6>e?this.modules[e][8]=g:8>e?this.modules[e+1][8]=g:this.modules[this.moduleCount-15+e][8]=g}for(var e=0;15>e;e++){var g=!a&&1==(1&d>>e);8>e?this.modules[8][this.moduleCount-e-1]=g:9>e?this.modules[8][15-e-1+1]=g:this.modules[8][15-e-1]=g}this.modules[this.moduleCount-8][8]=!a},mapData:function(a,b){for(var c=-1,d=this.moduleCount-1,e=7,g=0,h=this.moduleCount-1;h>0;h-=2)for(6==h&&h--;;){for(var i=0;2>i;i++)if(null==this.modules[d][h-i]){var j=!1;g<a.length&&(j=1==(1&a[g]>>>e));var k=f.getMask(b,d,h-i);k&&(j=!j),this.modules[d][h-i]=j,e--,-1==e&&(g++,e=7)}if(d+=c,0>d||this.moduleCount<=d){d-=c,c=-c;break}}}},b.PAD0=236,b.PAD1=17,b.createData=function(a,c,d){for(var e=j.getRSBlocks(a,c),g=new k,h=0;h<d.length;h++){var i=d[h];g.put(i.mode,4),g.put(i.getLength(),f.getLengthInBits(i.mode,a)),i.write(g)}for(var l=0,h=0;h<e.length;h++)l+=e[h].dataCount;if(g.getLengthInBits()>8*l)throw new Error("code length overflow. ("+g.getLengthInBits()+">"+8*l+")");for(g.getLengthInBits()+4<=8*l&&g.put(0,4);0!=g.getLengthInBits()%8;)g.putBit(!1);for(;;){if(g.getLengthInBits()>=8*l)break;if(g.put(b.PAD0,8),g.getLengthInBits()>=8*l)break;g.put(b.PAD1,8)}return b.createBytes(g,e)},b.createBytes=function(a,b){for(var c=0,d=0,e=0,g=new Array(b.length),h=new Array(b.length),j=0;j<b.length;j++){var k=b[j].dataCount,l=b[j].totalCount-k;d=Math.max(d,k),e=Math.max(e,l),g[j]=new Array(k);for(var m=0;m<g[j].length;m++)g[j][m]=255&a.buffer[m+c];c+=k;var n=f.getErrorCorrectPolynomial(l),o=new i(g[j],n.getLength()-1),p=o.mod(n);h[j]=new Array(n.getLength()-1);for(var m=0;m<h[j].length;m++){var q=m+p.getLength()-h[j].length;h[j][m]=q>=0?p.get(q):0}}for(var r=0,m=0;m<b.length;m++)r+=b[m].totalCount;for(var s=new Array(r),t=0,m=0;d>m;m++)for(var j=0;j<b.length;j++)m<g[j].length&&(s[t++]=g[j][m]);for(var m=0;e>m;m++)for(var j=0;j<b.length;j++)m<h[j].length&&(s[t++]=h[j][m]);return s};for(var c={MODE_NUMBER:1,MODE_ALPHA_NUM:2,MODE_8BIT_BYTE:4,MODE_KANJI:8},d={L:1,M:0,Q:3,H:2},e={PATTERN000:0,PATTERN001:1,PATTERN010:2,PATTERN011:3,PATTERN100:4,PATTERN101:5,PATTERN110:6,PATTERN111:7},f={PATTERN_POSITION_TABLE:[[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50],[6,30,54],[6,32,58],[6,34,62],[6,26,46,66],[6,26,48,70],[6,26,50,74],[6,30,54,78],[6,30,56,82],[6,30,58,86],[6,34,62,90],[6,28,50,72,94],[6,26,50,74,98],[6,30,54,78,102],[6,28,54,80,106],[6,32,58,84,110],[6,30,58,86,114],[6,34,62,90,118],[6,26,50,74,98,122],[6,30,54,78,102,126],[6,26,52,78,104,130],[6,30,56,82,108,134],[6,34,60,86,112,138],[6,30,58,86,114,142],[6,34,62,90,118,146],[6,30,54,78,102,126,150],[6,24,50,76,102,128,154],[6,28,54,80,106,132,158],[6,32,58,84,110,136,162],[6,26,54,82,110,138,166],[6,30,58,86,114,142,170]],G15:1335,G18:7973,G15_MASK:21522,getBCHTypeInfo:function(a){for(var b=a<<10;f.getBCHDigit(b)-f.getBCHDigit(f.G15)>=0;)b^=f.G15<<f.getBCHDigit(b)-f.getBCHDigit(f.G15);return(a<<10|b)^f.G15_MASK},getBCHTypeNumber:function(a){for(var b=a<<12;f.getBCHDigit(b)-f.getBCHDigit(f.G18)>=0;)b^=f.G18<<f.getBCHDigit(b)-f.getBCHDigit(f.G18);return a<<12|b},getBCHDigit:function(a){for(var b=0;0!=a;)b++,a>>>=1;return b},getPatternPosition:function(a){return f.PATTERN_POSITION_TABLE[a-1]},getMask:function(a,b,c){switch(a){case e.PATTERN000:return 0==(b+c)%2;case e.PATTERN001:return 0==b%2;case e.PATTERN010:return 0==c%3;case e.PATTERN011:return 0==(b+c)%3;case e.PATTERN100:return 0==(Math.floor(b/2)+Math.floor(c/3))%2;case e.PATTERN101:return 0==b*c%2+b*c%3;case e.PATTERN110:return 0==(b*c%2+b*c%3)%2;case e.PATTERN111:return 0==(b*c%3+(b+c)%2)%2;default:throw new Error("bad maskPattern:"+a)}},getErrorCorrectPolynomial:function(a){for(var b=new i([1],0),c=0;a>c;c++)b=b.multiply(new i([1,g.gexp(c)],0));return b},getLengthInBits:function(a,b){if(b>=1&&10>b)switch(a){case c.MODE_NUMBER:return 10;case c.MODE_ALPHA_NUM:return 9;case c.MODE_8BIT_BYTE:return 8;case c.MODE_KANJI:return 8;default:throw new Error("mode:"+a)}else if(27>b)switch(a){case c.MODE_NUMBER:return 12;case c.MODE_ALPHA_NUM:return 11;case c.MODE_8BIT_BYTE:return 16;case c.MODE_KANJI:return 10;default:throw new Error("mode:"+a)}else{if(!(41>b))throw new Error("type:"+b);switch(a){case c.MODE_NUMBER:return 14;case c.MODE_ALPHA_NUM:return 13;case c.MODE_8BIT_BYTE:return 16;case c.MODE_KANJI:return 12;default:throw new Error("mode:"+a)}}},getLostPoint:function(a){for(var b=a.getModuleCount(),c=0,d=0;b>d;d++)for(var e=0;b>e;e++){for(var f=0,g=a.isDark(d,e),h=-1;1>=h;h++)if(!(0>d+h||d+h>=b))for(var i=-1;1>=i;i++)0>e+i||e+i>=b||(0!=h||0!=i)&&g==a.isDark(d+h,e+i)&&f++;f>5&&(c+=3+f-5)}for(var d=0;b-1>d;d++)for(var e=0;b-1>e;e++){var j=0;a.isDark(d,e)&&j++,a.isDark(d+1,e)&&j++,a.isDark(d,e+1)&&j++,a.isDark(d+1,e+1)&&j++,(0==j||4==j)&&(c+=3)}for(var d=0;b>d;d++)for(var e=0;b-6>e;e++)a.isDark(d,e)&&!a.isDark(d,e+1)&&a.isDark(d,e+2)&&a.isDark(d,e+3)&&a.isDark(d,e+4)&&!a.isDark(d,e+5)&&a.isDark(d,e+6)&&(c+=40);for(var e=0;b>e;e++)for(var d=0;b-6>d;d++)a.isDark(d,e)&&!a.isDark(d+1,e)&&a.isDark(d+2,e)&&a.isDark(d+3,e)&&a.isDark(d+4,e)&&!a.isDark(d+5,e)&&a.isDark(d+6,e)&&(c+=40);for(var k=0,e=0;b>e;e++)for(var d=0;b>d;d++)a.isDark(d,e)&&k++;var l=Math.abs(100*k/b/b-50)/5;return c+=10*l}},g={glog:function(a){if(1>a)throw new Error("glog("+a+")");return g.LOG_TABLE[a]},gexp:function(a){for(;0>a;)a+=255;for(;a>=256;)a-=255;return g.EXP_TABLE[a]},EXP_TABLE:new Array(256),LOG_TABLE:new Array(256)},h=0;8>h;h++)g.EXP_TABLE[h]=1<<h;for(var h=8;256>h;h++)g.EXP_TABLE[h]=g.EXP_TABLE[h-4]^g.EXP_TABLE[h-5]^g.EXP_TABLE[h-6]^g.EXP_TABLE[h-8];for(var h=0;255>h;h++)g.LOG_TABLE[g.EXP_TABLE[h]]=h;i.prototype={get:function(a){return this.num[a]},getLength:function(){return this.num.length},multiply:function(a){for(var b=new Array(this.getLength()+a.getLength()-1),c=0;c<this.getLength();c++)for(var d=0;d<a.getLength();d++)b[c+d]^=g.gexp(g.glog(this.get(c))+g.glog(a.get(d)));return new i(b,0)},mod:function(a){if(this.getLength()-a.getLength()<0)return this;for(var b=g.glog(this.get(0))-g.glog(a.get(0)),c=new Array(this.getLength()),d=0;d<this.getLength();d++)c[d]=this.get(d);for(var d=0;d<a.getLength();d++)c[d]^=g.gexp(g.glog(a.get(d))+b);return new i(c,0).mod(a)}},j.RS_BLOCK_TABLE=[[1,26,19],[1,26,16],[1,26,13],[1,26,9],[1,44,34],[1,44,28],[1,44,22],[1,44,16],[1,70,55],[1,70,44],[2,35,17],[2,35,13],[1,100,80],[2,50,32],[2,50,24],[4,25,9],[1,134,108],[2,67,43],[2,33,15,2,34,16],[2,33,11,2,34,12],[2,86,68],[4,43,27],[4,43,19],[4,43,15],[2,98,78],[4,49,31],[2,32,14,4,33,15],[4,39,13,1,40,14],[2,121,97],[2,60,38,2,61,39],[4,40,18,2,41,19],[4,40,14,2,41,15],[2,146,116],[3,58,36,2,59,37],[4,36,16,4,37,17],[4,36,12,4,37,13],[2,86,68,2,87,69],[4,69,43,1,70,44],[6,43,19,2,44,20],[6,43,15,2,44,16],[4,101,81],[1,80,50,4,81,51],[4,50,22,4,51,23],[3,36,12,8,37,13],[2,116,92,2,117,93],[6,58,36,2,59,37],[4,46,20,6,47,21],[7,42,14,4,43,15],[4,133,107],[8,59,37,1,60,38],[8,44,20,4,45,21],[12,33,11,4,34,12],[3,145,115,1,146,116],[4,64,40,5,65,41],[11,36,16,5,37,17],[11,36,12,5,37,13],[5,109,87,1,110,88],[5,65,41,5,66,42],[5,54,24,7,55,25],[11,36,12],[5,122,98,1,123,99],[7,73,45,3,74,46],[15,43,19,2,44,20],[3,45,15,13,46,16],[1,135,107,5,136,108],[10,74,46,1,75,47],[1,50,22,15,51,23],[2,42,14,17,43,15],[5,150,120,1,151,121],[9,69,43,4,70,44],[17,50,22,1,51,23],[2,42,14,19,43,15],[3,141,113,4,142,114],[3,70,44,11,71,45],[17,47,21,4,48,22],[9,39,13,16,40,14],[3,135,107,5,136,108],[3,67,41,13,68,42],[15,54,24,5,55,25],[15,43,15,10,44,16],[4,144,116,4,145,117],[17,68,42],[17,50,22,6,51,23],[19,46,16,6,47,17],[2,139,111,7,140,112],[17,74,46],[7,54,24,16,55,25],[34,37,13],[4,151,121,5,152,122],[4,75,47,14,76,48],[11,54,24,14,55,25],[16,45,15,14,46,16],[6,147,117,4,148,118],[6,73,45,14,74,46],[11,54,24,16,55,25],[30,46,16,2,47,17],[8,132,106,4,133,107],[8,75,47,13,76,48],[7,54,24,22,55,25],[22,45,15,13,46,16],[10,142,114,2,143,115],[19,74,46,4,75,47],[28,50,22,6,51,23],[33,46,16,4,47,17],[8,152,122,4,153,123],[22,73,45,3,74,46],[8,53,23,26,54,24],[12,45,15,28,46,16],[3,147,117,10,148,118],[3,73,45,23,74,46],[4,54,24,31,55,25],[11,45,15,31,46,16],[7,146,116,7,147,117],[21,73,45,7,74,46],[1,53,23,37,54,24],[19,45,15,26,46,16],[5,145,115,10,146,116],[19,75,47,10,76,48],[15,54,24,25,55,25],[23,45,15,25,46,16],[13,145,115,3,146,116],[2,74,46,29,75,47],[42,54,24,1,55,25],[23,45,15,28,46,16],[17,145,115],[10,74,46,23,75,47],[10,54,24,35,55,25],[19,45,15,35,46,16],[17,145,115,1,146,116],[14,74,46,21,75,47],[29,54,24,19,55,25],[11,45,15,46,46,16],[13,145,115,6,146,116],[14,74,46,23,75,47],[44,54,24,7,55,25],[59,46,16,1,47,17],[12,151,121,7,152,122],[12,75,47,26,76,48],[39,54,24,14,55,25],[22,45,15,41,46,16],[6,151,121,14,152,122],[6,75,47,34,76,48],[46,54,24,10,55,25],[2,45,15,64,46,16],[17,152,122,4,153,123],[29,74,46,14,75,47],[49,54,24,10,55,25],[24,45,15,46,46,16],[4,152,122,18,153,123],[13,74,46,32,75,47],[48,54,24,14,55,25],[42,45,15,32,46,16],[20,147,117,4,148,118],[40,75,47,7,76,48],[43,54,24,22,55,25],[10,45,15,67,46,16],[19,148,118,6,149,119],[18,75,47,31,76,48],[34,54,24,34,55,25],[20,45,15,61,46,16]],j.getRSBlocks=function(a,b){var c=j.getRsBlockTable(a,b);if(void 0==c)throw new Error("bad rs block @ typeNumber:"+a+"/errorCorrectLevel:"+b);for(var d=c.length/3,e=[],f=0;d>f;f++)for(var g=c[3*f+0],h=c[3*f+1],i=c[3*f+2],k=0;g>k;k++)e.push(new j(h,i));return e},j.getRsBlockTable=function(a,b){switch(b){case d.L:return j.RS_BLOCK_TABLE[4*(a-1)+0];case d.M:return j.RS_BLOCK_TABLE[4*(a-1)+1];case d.Q:return j.RS_BLOCK_TABLE[4*(a-1)+2];case d.H:return j.RS_BLOCK_TABLE[4*(a-1)+3];default:return void 0}},k.prototype={get:function(a){var b=Math.floor(a/8);return 1==(1&this.buffer[b]>>>7-a%8)},put:function(a,b){for(var c=0;b>c;c++)this.putBit(1==(1&a>>>b-c-1))},getLengthInBits:function(){return this.length},putBit:function(a){var b=Math.floor(this.length/8);this.buffer.length<=b&&this.buffer.push(0),a&&(this.buffer[b]|=128>>>this.length%8),this.length++}};var l=[[17,14,11,7],[32,26,20,14],[53,42,32,24],[78,62,46,34],[106,84,60,44],[134,106,74,58],[154,122,86,64],[192,152,108,84],[230,180,130,98],[271,213,151,119],[321,251,177,137],[367,287,203,155],[425,331,241,177],[458,362,258,194],[520,412,292,220],[586,450,322,250],[644,504,364,280],[718,560,394,310],[792,624,442,338],[858,666,482,382],[929,711,509,403],[1003,779,565,439],[1091,857,611,461],[1171,911,661,511],[1273,997,715,535],[1367,1059,751,593],[1465,1125,805,625],[1528,1190,868,658],[1628,1264,908,698],[1732,1370,982,742],[1840,1452,1030,790],[1952,1538,1112,842],[2068,1628,1168,898],[2188,1722,1228,958],[2303,1809,1283,983],[2431,1911,1351,1051],[2563,1989,1423,1093],[2699,2099,1499,1139],[2809,2213,1579,1219],[2953,2331,1663,1273]],o=function(){var a=function(a,b){this._el=a,this._htOption=b};return a.prototype.draw=function(a){function g(a,b){var c=document.createElementNS("http://www.w3.org/2000/svg",a);for(var d in b)b.hasOwnProperty(d)&&c.setAttribute(d,b[d]);return c}var b=this._htOption,c=this._el,d=a.getModuleCount();Math.floor(b.width/d),Math.floor(b.height/d),this.clear();var h=g("svg",{viewBox:"0 0 "+String(d)+" "+String(d),width:"100%",height:"100%",fill:b.colorLight});h.setAttributeNS("http://www.w3.org/2000/xmlns/","xmlns:xlink","http://www.w3.org/1999/xlink"),c.appendChild(h),h.appendChild(g("rect",{fill:b.colorDark,width:"1",height:"1",id:"template"}));for(var i=0;d>i;i++)for(var j=0;d>j;j++)if(a.isDark(i,j)){var k=g("use",{x:String(i),y:String(j)});k.setAttributeNS("http://www.w3.org/1999/xlink","href","#template"),h.appendChild(k)}},a.prototype.clear=function(){for(;this._el.hasChildNodes();)this._el.removeChild(this._el.lastChild)},a}(),p="svg"===document.documentElement.tagName.toLowerCase(),q=p?o:m()?function(){function a(){this._elImage.src=this._elCanvas.toDataURL("image/png"),this._elImage.style.display="block",this._elCanvas.style.display="none"}function d(a,b){var c=this;if(c._fFail=b,c._fSuccess=a,null===c._bSupportDataURI){var d=document.createElement("img"),e=function(){c._bSupportDataURI=!1,c._fFail&&_fFail.call(c)},f=function(){c._bSupportDataURI=!0,c._fSuccess&&c._fSuccess.call(c)};return d.onabort=e,d.onerror=e,d.onload=f,d.src="data:image/gif;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==",void 0}c._bSupportDataURI===!0&&c._fSuccess?c._fSuccess.call(c):c._bSupportDataURI===!1&&c._fFail&&c._fFail.call(c)}if(this._android&&this._android<=2.1){var b=1/window.devicePixelRatio,c=CanvasRenderingContext2D.prototype.drawImage;CanvasRenderingContext2D.prototype.drawImage=function(a,d,e,f,g,h,i,j){if("nodeName"in a&&/img/i.test(a.nodeName))for(var l=arguments.length-1;l>=1;l--)arguments[l]=arguments[l]*b;else"undefined"==typeof j&&(arguments[1]*=b,arguments[2]*=b,arguments[3]*=b,arguments[4]*=b);c.apply(this,arguments)}}var e=function(a,b){this._bIsPainted=!1,this._android=n(),this._htOption=b,this._elCanvas=document.createElement("canvas"),this._elCanvas.width=b.width,this._elCanvas.height=b.height,a.appendChild(this._elCanvas),this._el=a,this._oContext=this._elCanvas.getContext("2d"),this._bIsPainted=!1,this._elImage=document.createElement("img"),this._elImage.style.display="none",this._el.appendChild(this._elImage),this._bSupportDataURI=null};return e.prototype.draw=function(a){var b=this._elImage,c=this._oContext,d=this._htOption,e=a.getModuleCount(),f=d.width/e,g=d.height/e,h=Math.round(f),i=Math.round(g);b.style.display="none",this.clear();for(var j=0;e>j;j++)for(var k=0;e>k;k++){var l=a.isDark(j,k),m=k*f,n=j*g;c.strokeStyle=l?d.colorDark:d.colorLight,c.lineWidth=1,c.fillStyle=l?d.colorDark:d.colorLight,c.fillRect(m,n,f,g),c.strokeRect(Math.floor(m)+.5,Math.floor(n)+.5,h,i),c.strokeRect(Math.ceil(m)-.5,Math.ceil(n)-.5,h,i)}this._bIsPainted=!0},e.prototype.makeImage=function(){this._bIsPainted&&d.call(this,a)},e.prototype.isPainted=function(){return this._bIsPainted},e.prototype.clear=function(){this._oContext.clearRect(0,0,this._elCanvas.width,this._elCanvas.height),this._bIsPainted=!1},e.prototype.round=function(a){return a?Math.floor(1e3*a)/1e3:a},e}():function(){var a=function(a,b){this._el=a,this._htOption=b};return a.prototype.draw=function(a){for(var b=this._htOption,c=this._el,d=a.getModuleCount(),e=Math.floor(b.width/d),f=Math.floor(b.height/d),g=['<table style="border:0;border-collapse:collapse;">'],h=0;d>h;h++){g.push("<tr>");for(var i=0;d>i;i++)g.push('<td style="border:0;border-collapse:collapse;padding:0;margin:0;width:'+e+"px;height:"+f+"px;background-color:"+(a.isDark(h,i)?b.colorDark:b.colorLight)+';"></td>');g.push("</tr>")}g.push("</table>"),c.innerHTML=g.join("");var j=c.childNodes[0],k=(b.width-j.offsetWidth)/2,l=(b.height-j.offsetHeight)/2;k>0&&l>0&&(j.style.margin=l+"px "+k+"px")},a.prototype.clear=function(){this._el.innerHTML=""},a}();QRCode=function(a,b){if(this._htOption={width:256,height:256,typeNumber:4,colorDark:"#000000",colorLight:"#ffffff",correctLevel:d.H},"string"==typeof b&&(b={text:b}),b)for(var c in b)this._htOption[c]=b[c];"string"==typeof a&&(a=document.getElementById(a)),this._android=n(),this._el=a,this._oQRCode=null,this._oDrawing=new q(this._el,this._htOption),this._htOption.text&&this.makeCode(this._htOption.text)},QRCode.prototype.makeCode=function(a){this._oQRCode=new b(r(a,this._htOption.correctLevel),this._htOption.correctLevel),this._oQRCode.addData(a),this._oQRCode.make(),this._el.title=a,this._oDrawing.draw(this._oQRCode),this.makeImage()},QRCode.prototype.makeImage=function(){"function"==typeof this._oDrawing.makeImage&&(!this._android||this._android>=3)&&this._oDrawing.makeImage()},QRCode.prototype.clear=function(){this._oDrawing.clear()},QRCode.CorrectLevel=d}();
+  </script>
+  <script src="/js/effects.js"></script>
+  <script src="/js/platform.js"></script>
+  <script src="/js/remote.js"></script>
+  <script>
+  (function () {
+    var CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    var views = {
+      landing: document.getElementById('view-landing'),
+      share: document.getElementById('view-share'),
+      activate: document.getElementById('view-activate'),
+      live: document.getElementById('view-live'),
+      ended: document.getElementById('view-ended')
+    };
+    var el = {
+      btnCreate: document.getElementById('btn-create'),
+      qrCanvas: document.getElementById('qr-canvas'),
+      qrFallbackNote: document.getElementById('qr-fallback-note'),
+      codeDisplay: document.getElementById('code-display'),
+      inputJoinCode: document.getElementById('input-join-code'),
+      btnJoinCode: document.getElementById('btn-join-code'),
+      joinCodeError: document.getElementById('join-code-error'),
+      sessionNameInput: document.getElementById('input-session-name'),
+      btnCopyLink: document.getElementById('btn-copy-link'),
+      btnJoinOwn: document.getElementById('btn-join-own'),
+      btnBackLanding: document.getElementById('btn-back-landing'),
+      activateCodeLabel: document.getElementById('activate-code-label'),
+      permissionError: document.getElementById('permission-error'),
+      btnActivate: document.getElementById('btn-activate'),
+      btnBackFromActivate: document.getElementById('btn-back-from-activate'),
+      liveCodeLabel: document.getElementById('live-code-label'),
+      torchBadge: document.getElementById('torch-badge'),
+      pulseWrap: document.getElementById('pulse-wrap'),
+      pulseCore: document.getElementById('pulse-core'),
+      bpmValue: document.getElementById('bpm-value'),
+      levelFill: document.getElementById('level-fill'),
+      levelThreshold: document.getElementById('level-threshold'),
+      levelLabel: document.getElementById('level-label'),
+      sensitivityBtns: Array.prototype.slice.call(document.querySelectorAll('.sensitivity-btn')),
+      metricLatency: document.getElementById('metric-latency'),
+      metricBeats: document.getElementById('metric-beats'),
+      metricPredicted: document.getElementById('metric-predicted'),
+      metricStability: document.getElementById('metric-stability'),
+      metricAutoAdjust: document.getElementById('metric-auto-adjust'),
+      btnCopyMetrics: document.getElementById('btn-copy-metrics'),
+      diagCamera: document.getElementById('diag-camera'),
+      diagGetUserMedia: document.getElementById('diag-getusermedia'),
+      diagMediaStreamTrack: document.getElementById('diag-mediastreamtrack'),
+      diagCapabilities: document.getElementById('diag-capabilities'),
+      diagTorchReported: document.getElementById('diag-torch-reported'),
+      diagTorchReal: document.getElementById('diag-torch-real'),
+      diagFlashStatus: document.getElementById('diag-flash-status'),
+      diagFlashReason: document.getElementById('diag-flash-reason'),
+      diagWakeLock: document.getElementById('diag-wakelock'),
+      diagVibration: document.getElementById('diag-vibration'),
+      diagAudioContext: document.getElementById('diag-audiocontext'),
+      btnCopyDiagnostics: document.getElementById('btn-copy-diagnostics'),
+      detSampleRate: document.getElementById('det-sample-rate'),
+      detFramesProcessed: document.getElementById('det-frames-processed'),
+      detBroadCrossings: document.getElementById('det-broad-crossings'),
+      detBandCrossings: document.getElementById('det-band-crossings'),
+      detAbsoluteGateRejected: document.getElementById('det-absolute-gate-rejected'),
+      detCandidates: document.getElementById('det-candidates'),
+      detRefractoryRejected: document.getElementById('det-refractory-rejected'),
+      detConfirmed: document.getElementById('det-confirmed'),
+      detFlashDedupRejected: document.getElementById('det-flash-dedup-rejected'),
+      detConsensusRejected: document.getElementById('det-consensus-rejected'),
+      detAccepted: document.getElementById('det-accepted'),
+      detBandFluxStats: document.getElementById('det-band-flux-stats'),
+      detBroadEnergyStats: document.getElementById('det-broad-energy-stats'),
+      detIntervalHistogram: document.getElementById('det-interval-histogram'),
+      detTempoLockEvents: document.getElementById('det-tempo-lock-events'),
+      detCandidateTrace: document.getElementById('det-candidate-trace'),
+      detLatchTrace: document.getElementById('det-latch-trace'),
+      detPipelineOutcomes: document.getElementById('det-pipeline-outcomes'),
+      detAcceptedReal: document.getElementById('det-accepted-real'),
+      btnCopyDetectorStats: document.getElementById('btn-copy-detector-stats'),
+      btnInviteMore: document.getElementById('btn-invite-more'),
+      btnStop: document.getElementById('btn-stop'),
+      hiddenVideo: document.getElementById('hidden-video'),
+      screenFlash: document.getElementById('screen-flash')
+    };
+
+    var sessionCode = null;
+    // True when this phone joined someone else's session (scanned the QR or
+    // typed a code) instead of creating its own — those guests should be
+    // exited when they stop, not dropped back on the "create a session"
+    // screen, which is meaningless for them.
+    var joinedViaLink = false;
+    var stream = null;
+    var videoTrack = null;
+    var torchSupported = false;
+    // Human-readable reason the last probe fell back to SCREEN, for the
+    // diagnostics panel — null while torch is confirmed or not yet probed.
+    var lastFlashFailureReason = null;
+    var audioCtx = null;
+    var analyserBroad = null;
+    var analyserBand = null;
+    var timeData = null;
+    var freqData = null;
+    var workletNode = null;
+    var fallbackTimerId = null;
+    // Separamos el reloj del onset REAL del reloj del último flash de
+    // CUALQUIER origen. Antes ambos compartían una sola "lastBeatTime": un
+    // pulso PREDICHO la pisaba justo antes de que llegara el onset real del
+    // mismo golpe, así que ese onset real medía un intervalo casi nulo desde
+    // el pulso predicho (corrompiendo beatIntervals) y encima disparaba un
+    // segundo flash visible pegado al primero — el síntoma de "se dispara
+    // más rápido que el BPM mostrado". lastRealBeatTime solo lo tocan los
+    // onsets reales (registerBeat) y alimenta tanto el cálculo de intervalos
+    // como el debounce del detector fallback; lastFlashTime lo tocan ambos
+    // orígenes y solo sirve para no disparar dos flashes por el mismo golpe.
+    var lastRealBeatTime = 0;
+    var lastFlashTime = 0;
+    var beatIntervals = [];
+    // Bass-region energy ("how kick-like this hit was") captured alongside
+    // each onset, chronological like beatIntervals — see computeTempoEstimate
+    // for why this is needed to tell a real beat apart from a subdivision.
+    var beatStrengths = [];
+    var wakeLock = null;
+
+    function requestWakeLock() {
+      if (!('wakeLock' in navigator)) return;
+      navigator.wakeLock.request('screen').then(function (lock) { wakeLock = lock; }).catch(function () {});
+    }
+
+    function releaseWakeLock() {
+      if (wakeLock) { wakeLock.release().catch(function () {}); wakeLock = null; }
+    }
+
+    document.addEventListener('visibilitychange', function () {
+      if (!stream) return;
+      if (document.visibilityState === 'hidden') {
+        // Android in particular can reclaim the camera/torch hardware
+        // session while a tab is backgrounded even though the JS track
+        // still reports "live" — torch commands silently stop doing
+        // anything on return (WhatsApp switch, incoming call, lock
+        // screen). Tear down only the parts that touch hardware/CPU while
+        // hidden; the mic/camera permission grant stays intact, so nothing
+        // needs re-requesting when the tab comes back.
+        if (predictedTimer) { clearTimeout(predictedTimer); predictedTimer = null; }
+        if (torchOffTimer) { clearTimeout(torchOffTimer); torchOffTimer = null; }
+        if (videoTrack && torchSupported) {
+          videoTrack.applyConstraints({ advanced: [{ torch: false }] }).catch(function () {});
+        }
+        torchState = TorchState.OFF;
+        if (audioCtx && audioCtx.state === 'running') { audioCtx.suspend().catch(function () {}); }
+        return;
+      }
+      if (document.visibilityState !== 'visible') return;
+      requestWakeLock();
+      if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume().catch(function () {}); }
+      // The torch hardware session may not have survived being
+      // backgrounded even though the track itself is still alive —
+      // reconfirm rather than trust whatever state we were in before.
+      setCheckingBadge();
+      setTimeout(probeTorch, 300);
+    });
+
+    function showView(name) {
+      Object.keys(views).forEach(function (key) {
+        views[key].classList.toggle('active', key === name);
+      });
+    }
+
+    function genCode() {
+      var s = '';
+      for (var i = 0; i < 6; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+      return s;
+    }
+
+    // A session code only ever needs to reach the UI (textContent, never
+    // innerHTML) and get percent-encoded into the shared QR link — never a
+    // server. Still worth sanitizing at the one point both untrusted
+    // sources (the ?s= URL param and manual "unirme con código" entry)
+    // funnel through:
+    //  - reject anything absurdly long BEFORE any regex/processing, so a
+    //    crafted 50,000-char query string can't cost real work;
+    //  - strip Unicode bidi/formatting/zero-width characters (U+202A-E,
+    //    U+2066-9, U+200B-F, U+FEFF) — an RTL override embedded in a code
+    //    could make it render as something other than its real value once
+    //    shown on screen;
+    //  - only accept the exact alphabet/length genCode() itself produces;
+    //    anything else is rejected outright rather than coerced.
+    var CODE_FORMAT_RE = new RegExp('^[' + CODE_CHARS + ']{6}$');
+    // Listed as decimal code points, not as literal characters or regex
+    // escapes in the source — a literal invisible character sitting in the
+    // file is exactly the kind of thing that's impossible to review in a
+    // diff and easy to corrupt via copy/paste or editor normalization.
+    // Zero-width space/joiners + LRM/RLM (8203-8207), explicit bidi
+    // embedding/override controls (8234-8238), bidi isolate controls
+    // (8294-8297), and the zero-width no-break space / BOM (65279).
+    var BIDI_AND_ZERO_WIDTH_CODEPOINTS = [8203, 8204, 8205, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297, 65279];
+    function stripBidiAndZeroWidth(str) {
+      var out = '';
+      for (var i = 0; i < str.length; i++) {
+        if (BIDI_AND_ZERO_WIDTH_CODEPOINTS.indexOf(str.charCodeAt(i)) === -1) out += str.charAt(i);
+      }
+      return out;
+    }
+    function sanitizeSessionCode(raw) {
+      if (typeof raw !== 'string' || raw.length === 0 || raw.length > 32) return null;
+      var cleaned = stripBidiAndZeroWidth(raw).trim().toUpperCase();
+      return CODE_FORMAT_RE.test(cleaned) ? cleaned : null;
+    }
+
+    function sessionLink(code) {
+      var url = new URL(location.href);
+      url.hash = '';
+      url.search = '';
+      url.searchParams.set('s', code);
+      return url.toString();
+    }
+
+    var qrInstance = null;
+
+    function renderShareView() {
+      el.codeDisplay.textContent = sessionCode;
+
+      try {
+        var link = sessionLink(sessionCode);
+        if (!qrInstance) {
+          qrInstance = new QRCode(el.qrCanvas, {
+            text: link,
+            width: 200,
+            height: 200,
+            colorDark: '#14121a',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.M
+          });
+        } else {
+          qrInstance.clear();
+          qrInstance.makeCode(link);
+        }
+        el.qrCanvas.style.display = 'block';
+        el.qrFallbackNote.hidden = true;
+      } catch (e) {
+        el.qrCanvas.style.display = 'none';
+        el.qrFallbackNote.hidden = false;
+      }
+
+      el.btnJoinOwn.textContent = stream ? 'Volver a mi sesión en vivo' : 'Activar en este teléfono';
+    }
+
+    el.btnCreate.addEventListener('click', function () {
+      sessionCode = genCode();
+      renderShareView();
+      showView('share');
+    });
+
+    el.btnCopyLink.addEventListener('click', function () {
+      var link = sessionLink(sessionCode);
+      var original = el.btnCopyLink.textContent;
+      navigator.clipboard.writeText(link).then(function () {
+        el.btnCopyLink.textContent = '¡Copiado!';
+        setTimeout(function () { el.btnCopyLink.textContent = original; }, 1500);
+      }).catch(function () {
+        el.btnCopyLink.textContent = link;
+      });
+    });
+
+    el.btnJoinOwn.addEventListener('click', function () {
+      if (stream) {
+        showView('live');
+        return;
+      }
+      el.activateCodeLabel.textContent = 'Sesión ' + sessionCode;
+      showView('activate');
+    });
+
+    el.btnJoinCode.addEventListener('click', function () {
+      var raw = el.inputJoinCode.value || '';
+      if (!raw) return;
+      var clean = sanitizeSessionCode(raw);
+      if (!clean) {
+        el.joinCodeError.hidden = false;
+        return;
+      }
+      el.joinCodeError.hidden = true;
+      sessionCode = clean;
+      joinedViaLink = true;
+      el.activateCodeLabel.textContent = 'Sesión ' + sessionCode;
+      showView('activate');
+    });
+
+    el.inputJoinCode.addEventListener('input', function () { el.joinCodeError.hidden = true; });
+
+    el.btnBackLanding.addEventListener('click', function () { showView('landing'); });
+    el.btnBackFromActivate.addEventListener('click', function () { showView('share'); });
+    el.btnInviteMore.addEventListener('click', function () {
+      renderShareView();
+      showView('share');
+    });
+
+    el.sensitivityBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var key = btn.getAttribute('data-sensitivity');
+        if (!SENSITIVITY_PRESETS.hasOwnProperty(key)) return;
+        sensitivityMultiplier = SENSITIVITY_PRESETS[key];
+        el.sensitivityBtns.forEach(function (b) { b.classList.toggle('active', b === btn); });
+        if (workletNode) {
+          workletNode.port.postMessage({ type: 'sensitivity', ratioMultiplier: sensitivityMultiplier });
+        }
+      });
+    });
+
+    function computeTempoStabilityPct() {
+      if (beatIntervals.length < 3) return null;
+      var mean = beatIntervals.reduce(function (a, b) { return a + b; }, 0) / beatIntervals.length;
+      if (!(mean > 0)) return null;
+      var variance = beatIntervals.reduce(function (a, b) { return a + (b - mean) * (b - mean); }, 0) / beatIntervals.length;
+      var coeffVariation = Math.sqrt(variance) / mean;
+      return Math.max(0, Math.round((1 - coeffVariation) * 100));
+    }
+
+    function refreshMetricsPanel() {
+      if (metrics.torchLatencies.length) {
+        var avgLatency = metrics.torchLatencies.reduce(function (a, b) { return a + b; }, 0) / metrics.torchLatencies.length;
+        el.metricLatency.textContent = Math.round(avgLatency) + ' ms';
+      } else {
+        el.metricLatency.textContent = '—';
+      }
+      el.metricBeats.textContent = String(metrics.beatsDetected);
+      el.metricPredicted.textContent = String(metrics.predictedPulses);
+      var stability = computeTempoStabilityPct();
+      el.metricStability.textContent = stability === null ? '—' : (tempoLocked ? stability + '% (sincronizado)' : stability + '%');
+      el.metricAutoAdjust.textContent = metrics.autoAdjust === null ? '—' : (metrics.autoAdjust.toFixed(2) + '×');
+    }
+
+    el.btnCopyMetrics.addEventListener('click', function () {
+      var avgLatency = metrics.torchLatencies.length
+        ? Math.round(metrics.torchLatencies.reduce(function (a, b) { return a + b; }, 0) / metrics.torchLatencies.length)
+        : null;
+      var summary = {
+        sesion: sessionCode,
+        modoFlash: torchSupported ? 'real' : 'pantalla',
+        sensibilidadElegida: Object.keys(SENSITIVITY_PRESETS).filter(function (k) { return SENSITIVITY_PRESETS[k] === sensitivityMultiplier; })[0] || 'normal',
+        ajusteAutomaticoCalibracion: metrics.autoAdjust,
+        latenciaMediaFlashMs: avgLatency,
+        golpesDetectados: metrics.beatsDetected,
+        pulsosPredichos: metrics.predictedPulses,
+        estabilidadTempoPct: computeTempoStabilityPct(),
+        tempoSincronizado: tempoLocked,
+        bpmActual: el.bpmValue.textContent
+      };
+      var text = JSON.stringify(summary, null, 2);
+      var original = el.btnCopyMetrics.textContent;
+      navigator.clipboard.writeText(text).then(function () {
+        el.btnCopyMetrics.textContent = '¡Copiado!';
+        setTimeout(function () { el.btnCopyMetrics.textContent = original; }, 1500);
+      }).catch(function () {});
+    });
+
+    // --- HardwareDetector: purely informational, never gates FLASH vs
+    // SCREEN. Some Android camera stacks report the "torch" capability
+    // incorrectly in both directions (see probeTorch's comment below), so
+    // the real toggle-probe stays the only source of truth for which mode
+    // is actually used. This just answers "what does this device claim to
+    // have", for the diagnostics panel a user can screenshot when they say
+    // "no anda".
+    var HardwareDetector = {
+      snapshot: function () {
+        var caps = null;
+        try {
+          caps = videoTrack && typeof videoTrack.getCapabilities === 'function' ? videoTrack.getCapabilities() : null;
+        } catch (e) {}
+        return {
+          camara: !!(stream && videoTrack),
+          getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+          mediaStreamTrack: typeof MediaStreamTrack !== 'undefined',
+          getCapabilities: !!(videoTrack && typeof videoTrack.getCapabilities === 'function'),
+          torchReportado: !!(caps && caps.torch),
+          torchConfirmado: torchSupported,
+          flashFailureReason: lastFlashFailureReason,
+          wakeLock: 'wakeLock' in navigator,
+          vibracion: typeof navigator.vibrate === 'function',
+          audioContext: !!(window.AudioContext || window.webkitAudioContext)
+        };
+      }
+    };
+
+    function diagMark(ok) { return ok ? '✓' : '✗'; }
+
+    // --- DetectorStats: raw counters from the onset detector ITSELF,
+    // before any of registerBeat()'s filtering (flash-dedup, median
+    // consensus). Tuning the algorithm blind from the final flash count
+    // conflates two very different failure modes — "the detector is
+    // missing real beats" vs. "the detector is generating a flood of
+    // candidates and registerBeat() is discarding most of them" — and only
+    // this layer can tell them apart. usingWorklet decides which of the
+    // two mirrors below is authoritative: the fallback path accumulates
+    // directly on the main thread (analyzeTick runs there), while the
+    // AudioWorklet runs on a separate thread and can't share these objects
+    // directly, so it accumulates its own copy internally and periodically
+    // syncs a snapshot over via postMessage (see handleWorkletMessage).
+    var CANDIDATE_HIST_EDGES_MS = [100, 150, 200, 250, 300, 400, 500, 700, 1000];
+    function histBucketLabel(i) {
+      if (i === 0) return '<' + CANDIDATE_HIST_EDGES_MS[0];
+      if (i === CANDIDATE_HIST_EDGES_MS.length) return '>' + CANDIDATE_HIST_EDGES_MS[CANDIDATE_HIST_EDGES_MS.length - 1];
+      return CANDIDATE_HIST_EDGES_MS[i - 1] + '-' + CANDIDATE_HIST_EDGES_MS[i];
+    }
+    function histBucketIndex(ms) {
+      for (var i = 0; i < CANDIDATE_HIST_EDGES_MS.length; i++) {
+        if (ms < CANDIDATE_HIST_EDGES_MS[i]) return i;
+      }
+      return CANDIDATE_HIST_EDGES_MS.length;
+    }
+    function makeFluxAccumulator() { return { sum: 0, sumSq: 0, count: 0, max: 0 }; }
+    function accumulate(acc, value) {
+      acc.sum += value;
+      acc.sumSq += value * value;
+      acc.count++;
+      if (value > acc.max) acc.max = value;
+    }
+    function accumulatorStats(acc) {
+      if (!acc || acc.count === 0) return null;
+      var mean = acc.sum / acc.count;
+      var variance = Math.max(0, acc.sumSq / acc.count - mean * mean);
+      return { mean: mean, max: acc.max, stddev: Math.sqrt(variance), count: acc.count };
+    }
+    function freshFallbackStats() {
+      return {
+        framesProcessed: 0,
+        broadThresholdCrossings: 0,
+        bandThresholdCrossings: 0,
+        candidates: 0,
+        refractoryRejected: 0,
+        confirmed: 0,
+        absoluteGateRejected: 0,
+        lastCandidateAt: 0,
+        intervalHist: new Array(CANDIDATE_HIST_EDGES_MS.length + 1).fill(0),
+        broadEnergy: makeFluxAccumulator(),
+        bandFlux: makeFluxAccumulator()
+      };
+    }
+
+    var CANDIDATE_TRACE_MAX = 40;
+    var LATCH_TRACE_MAX = 30;
+
+    var DetectorStats = {
+      fallback: freshFallbackStats(),
+      worklet: null,
+      usingWorklet: false,
+      // Rastro crudo de los últimos rawCandidate (antes del gate absoluto y
+      // del refractario) — timestamp, energía/flux/umbral en el momento
+      // exacto y qué canal disparó. Existe para responder una pregunta
+      // puntual: ¿el detector genera más de un candidato por golpe físico
+      // real? Con ~20-30 entradas alcanza para verlo a ojo comparando
+      // intervaloDesdeAnterior contra el tempo real de la canción de prueba.
+      trace: [],
+      lastTraceAt: 0,
+      traceIdCounter: 0,
+
+      // Devuelve la entrada recién creada (no solo la guarda) para que el
+      // llamador pueda ir actualizando `resultadoDetector` a medida que ese
+      // MISMO candidato avanza por el gate absoluto y el refractario del
+      // detector — ambos se deciden de forma síncrona en el mismo tick, así
+      // que mutar el objeto ya empujado al arreglo es seguro acá. Lo que NO
+      // se puede resolver así es el destino en registerBeat() (dedup de
+      // flash / consenso / REAL), porque en el camino del Worklet eso pasa
+      // varios milisegundos después y en el otro hilo — para eso existe
+      // `id` + `recordPipelineOutcome` por separado (ver más abajo).
+      recordTrace: function (now, canal, energyFast, energySlow, flux, umbralEnergia, umbralFlux) {
+        var interval = this.lastTraceAt > 0 ? Math.round(now - this.lastTraceAt) : null;
+        this.traceIdCounter++;
+        var entry = {
+          id: this.traceIdCounter,
+          tMs: sessionStartTime > 0 ? Math.round(now - sessionStartTime) : Math.round(now),
+          canal: canal,
+          energyFast: Math.round(energyFast * 10000) / 10000,
+          energySlow: Math.round(energySlow * 10000) / 10000,
+          flux: Math.round(flux * 10000) / 10000,
+          umbralEnergia: Math.round(umbralEnergia * 10000) / 10000,
+          umbralFlux: Math.round(umbralFlux * 10000) / 10000,
+          intervaloDesdeAnterior: interval,
+          resultadoDetector: 'pendiente'
+        };
+        this.trace.push(entry);
+        if (this.trace.length > CANDIDATE_TRACE_MAX) this.trace.shift();
+        this.lastTraceAt = now;
+        return entry;
+      },
+
+      // Destino final en registerBeat() de un candidato que ya pasó el gate
+      // absoluto y el refractario del detector — la pieza que faltaba para
+      // responder "¿los candidatos espurios se descartan todos, o algunos
+      // llegan a alimentar el tempo?". candidateId enlaza (cuando el tiempo
+      // lo permite) con el `id` de rastreoCandidatos; puede ser null si no
+      // había un candidato rastreado disponible en ese momento.
+      pipelineOutcomes: [],
+      recordPipelineOutcome: function (candidateId, resultado) {
+        var now = performance.now();
+        this.pipelineOutcomes.push({
+          candidateId: candidateId === undefined ? null : candidateId,
+          resultado: resultado,
+          tMs: sessionStartTime > 0 ? Math.round(now - sessionStartTime) : Math.round(now)
+        });
+        if (this.pipelineOutcomes.length > 30) this.pipelineOutcomes.shift();
+      },
+
+      // Historial de cada beat REAL efectivamente aceptado — a diferencia de
+      // todo lo anterior (que audita candidatos espurios/de más), esto
+      // responde la pregunta inversa: ¿el detector está OMITIENDO golpes
+      // reales? Un salto de deltaMs a ~2x el período reciente, con nada
+      // intermedio, es la firma inequívoca de un beat real perdido — el
+      // predictor puede disimularlo con un pulso PREDICTED, pero acá se ve
+      // el dato crudo de lo que el detector realmente confirmó.
+      acceptedRealTrace: [],
+      recordAcceptedReal: function (candidateId, deltaMs) {
+        var now = performance.now();
+        var canal = null;
+        for (var i = this.trace.length - 1; i >= 0; i--) {
+          if (this.trace[i].id === candidateId) { canal = this.trace[i].canal; break; }
+        }
+        this.acceptedRealTrace.push({
+          candidateId: candidateId === undefined ? null : candidateId,
+          tMs: sessionStartTime > 0 ? Math.round(now - sessionStartTime) : Math.round(now),
+          deltaMs: (deltaMs === null || deltaMs === undefined) ? null : Math.round(deltaMs),
+          canal: canal,
+          bpmActual: deltaMs ? Math.round(60000 / deltaMs) : null
+        });
+        if (this.acceptedRealTrace.length > 50) this.acceptedRealTrace.shift();
+      },
+
+      // Rastro de cada transición del LATCH mismo (false→true, true→false),
+      // no del candidato resultante — responde una pregunta distinta a
+      // `trace`: ¿el latch entra y sale del estado "above" varias veces
+      // durante una misma envolvente de golpe (señal de histéresis rota),
+      // o entra una vez y se mantiene arriba hasta que la energía realmente
+      // decae? Si "sube" y "baja" alternan cada 10-30ms para el MISMO canal,
+      // eso es re-disparo dentro del mismo golpe, no golpes distintos.
+      latchTrace: [],
+      recordLatchTransition: function (now, canal, direccion, valor, on, off) {
+        this.latchTrace.push({
+          tMs: sessionStartTime > 0 ? Math.round(now - sessionStartTime) : Math.round(now),
+          canal: canal,
+          direccion: direccion,
+          valor: Math.round(valor * 10000) / 10000,
+          on: Math.round(on * 10000) / 10000,
+          off: Math.round(off * 10000) / 10000
+        });
+        if (this.latchTrace.length > LATCH_TRACE_MAX) this.latchTrace.shift();
+      },
+
+      // broadAboveThreshold/bandAboveThreshold are the RAW level checks
+      // (value > threshold this frame), independent of the aboveThreshold
+      // hysteresis latch — a candidate only fires once per hump at the
+      // rising edge, but this counts every single frame the raw value
+      // spends over the line. A huge gap between this and framesProcessed
+      // is normal (a hump lasts several frames); what matters is the ratio
+      // of THIS to candidates — many threshold-crossing frames collapsing
+      // into few candidates is healthy hysteresis working as intended, but
+      // if thresholdCrossings is a very large fraction of framesProcessed,
+      // the threshold itself is riding too close to the noise floor to be
+      // a meaningful gate at all, independent of anything downstream.
+      recordFallbackSample: function (broadEnergyValue, bandFluxValue, broadAboveThreshold, bandAboveThreshold) {
+        this.fallback.framesProcessed++;
+        if (broadAboveThreshold) this.fallback.broadThresholdCrossings++;
+        if (bandAboveThreshold) this.fallback.bandThresholdCrossings++;
+        accumulate(this.fallback.broadEnergy, broadEnergyValue);
+        accumulate(this.fallback.bandFlux, bandFluxValue);
+      },
+      recordFallbackCandidate: function (now, confirmed) {
+        this.fallback.candidates++;
+        if (confirmed) this.fallback.confirmed++; else this.fallback.refractoryRejected++;
+        if (this.fallback.lastCandidateAt > 0) {
+          this.fallback.intervalHist[histBucketIndex(now - this.fallback.lastCandidateAt)]++;
+        }
+        this.fallback.lastCandidateAt = now;
+      },
+      recordAbsoluteGateRejection: function () {
+        this.fallback.absoluteGateRejected++;
+      },
+      applyWorkletSnapshot: function (snap) {
+        this.usingWorklet = true;
+        this.worklet = snap;
+        // El Worklet mantiene su propio anillo (no puede llamar a
+        // recordTrace de este hilo) y lo manda entero en cada snapshot
+        // periódico — simplemente lo reemplazamos por el más reciente.
+        if (snap.candidateTraceRecent) this.trace = snap.candidateTraceRecent;
+        if (snap.latchTraceRecent) this.latchTrace = snap.latchTraceRecent;
+      },
+      reset: function () {
+        this.fallback = freshFallbackStats();
+        this.worklet = null;
+        this.usingWorklet = false;
+        this.trace = [];
+        this.lastTraceAt = 0;
+        this.traceIdCounter = 0;
+        this.latchTrace = [];
+        this.pipelineOutcomes = [];
+        this.acceptedRealTrace = [];
+      },
+      snapshot: function () {
+        if (this.usingWorklet) {
+          var w = this.worklet || {};
+          var wHist = w.intervalHist || [];
+          var histW = {};
+          for (var i = 0; i < wHist.length; i++) histW[histBucketLabel(i)] = wHist[i];
+          return {
+            fuente: 'worklet',
+            gateAbsolutoConfigurado: DetectorConfig.absoluteEnergyGate,
+            sampleRate: w.sampleRate || null,
+            llamadasPorSegundo: w.callsPerSecond || null,
+            framesProcesados: w.framesProcessed || 0,
+            crucesUmbralBandaAncha: w.broadThresholdCrossings || 0,
+            crucesUmbralBanda: w.bandThresholdCrossings || 0,
+            candidatos: w.candidates || 0,
+            rechazadosPorGateAbsoluto: w.absoluteGateRejected || 0,
+            rechazadosPorRefractario: w.refractoryRejected || 0,
+            confirmadosPorDetector: w.confirmed || 0,
+            fluxBanda: w.bandFluxStats || null,
+            energiaBandaAncha: w.broadEnergyStats || null,
+            histogramaIntervalos: histW,
+            rastreoCandidatos: this.trace,
+            transicionesLatch: this.latchTrace,
+            resultadosPipeline: this.pipelineOutcomes,
+            historialReal: this.acceptedRealTrace
+          };
+        }
+        var f = this.fallback;
+        var histF = {};
+        for (var j = 0; j < f.intervalHist.length; j++) histF[histBucketLabel(j)] = f.intervalHist[j];
+        return {
+          fuente: 'fallback',
+          gateAbsolutoConfigurado: DetectorConfig.absoluteEnergyGate,
+          sampleRate: (typeof audioCtx !== 'undefined' && audioCtx) ? audioCtx.sampleRate : null,
+          llamadasPorSegundo: Math.round(1000 / 12),
+          framesProcesados: f.framesProcessed,
+          crucesUmbralBandaAncha: f.broadThresholdCrossings,
+          crucesUmbralBanda: f.bandThresholdCrossings,
+          candidatos: f.candidates,
+          rechazadosPorGateAbsoluto: f.absoluteGateRejected,
+          rechazadosPorRefractario: f.refractoryRejected,
+          confirmadosPorDetector: f.confirmed,
+          fluxBanda: accumulatorStats(f.bandFlux),
+          energiaBandaAncha: accumulatorStats(f.broadEnergy),
+          histogramaIntervalos: histF,
+          rastreoCandidatos: this.trace,
+          transicionesLatch: this.latchTrace,
+          resultadosPipeline: this.pipelineOutcomes,
+          historialReal: this.acceptedRealTrace
+        };
+      }
+    };
+
+    function formatFluxStats(stats) {
+      if (!stats) return '—';
+      return stats.mean.toFixed(3) + ' / ' + stats.max.toFixed(3) + ' / ' + stats.stddev.toFixed(3);
+    }
+
+    function refreshDetectorPanel() {
+      var d = DetectorStats.snapshot();
+      var registerBeatRejected = metrics.flashDedupRejected + metrics.consensusRejected;
+      el.detSampleRate.textContent = (d.sampleRate ? (d.sampleRate + 'Hz') : '—') + ' / ' + (d.llamadasPorSegundo ? (d.llamadasPorSegundo + '/s') : '—');
+      el.detFramesProcessed.textContent = String(d.framesProcesados);
+      el.detBroadCrossings.textContent = String(d.crucesUmbralBandaAncha);
+      el.detBandCrossings.textContent = String(d.crucesUmbralBanda);
+      el.detAbsoluteGateRejected.textContent = String(d.rechazadosPorGateAbsoluto || 0);
+      el.detCandidates.textContent = String(d.candidatos);
+      el.detRefractoryRejected.textContent = String(d.rechazadosPorRefractario);
+      el.detConfirmed.textContent = String(d.confirmadosPorDetector);
+      el.detFlashDedupRejected.textContent = String(metrics.flashDedupRejected);
+      el.detConsensusRejected.textContent = String(metrics.consensusRejected);
+      el.detAccepted.textContent = String(metrics.beatsDetected);
+      el.detBandFluxStats.textContent = formatFluxStats(d.fluxBanda);
+      el.detBroadEnergyStats.textContent = formatFluxStats(d.energiaBandaAncha);
+      var histLines = Object.keys(d.histogramaIntervalos).map(function (label) {
+        return label.padEnd ? (label + 'ms').padEnd(11) + d.histogramaIntervalos[label] : label + 'ms: ' + d.histogramaIntervalos[label];
+      });
+      el.detIntervalHistogram.textContent = histLines.length ? histLines.join('\n') : '—';
+      var acceptedRealLines = (d.historialReal || []).map(function (r) {
+        return '#' + (r.candidateId === null ? '—' : r.candidateId) + ' ' + r.tMs + 'ms Δ=' + (r.deltaMs === null ? '—' : r.deltaMs + 'ms') + ' ' + (r.bpmActual === null ? '' : r.bpmActual + 'bpm ') + (r.canal || '');
+      });
+      el.detAcceptedReal.textContent = acceptedRealLines.length ? acceptedRealLines.join('\n') : '—';
+      var lockLines = tempoLockEvents.map(function (ev) {
+        return ev.tDesdeInicioMs + 'ms / ' + ev.intervalosUsados + ' int. / ' + ev.bpmCalculado + ' BPM / ' + ev.desviacionPct + '%';
+      });
+      el.detTempoLockEvents.textContent = lockLines.length ? lockLines.join('\n') : '—';
+      var traceLines = (d.rastreoCandidatos || []).map(function (t) {
+        return '#' + t.id + ' ' + t.tMs + 'ms ' + t.canal + ' e=' + t.energyFast + '/' + t.umbralEnergia + ' f=' + t.flux + '/' + t.umbralFlux + ' Δ=' + (t.intervaloDesdeAnterior === null ? '—' : t.intervaloDesdeAnterior + 'ms') + ' → ' + t.resultadoDetector;
+      });
+      el.detCandidateTrace.textContent = traceLines.length ? traceLines.join('\n') : '—';
+      var latchLines = (d.transicionesLatch || []).map(function (t) {
+        return t.tMs + 'ms ' + t.canal + ' ' + t.direccion + ' valor=' + t.valor + ' on=' + t.on + ' off=' + t.off;
+      });
+      el.detLatchTrace.textContent = latchLines.length ? latchLines.join('\n') : '—';
+      var pipelineLines = (d.resultadosPipeline || []).map(function (p) {
+        return p.tMs + 'ms candidato#' + (p.candidateId === null ? '—' : p.candidateId) + ' → ' + p.resultado;
+      });
+      el.detPipelineOutcomes.textContent = pipelineLines.length ? pipelineLines.join('\n') : '—';
+    }
+
+    el.btnCopyDetectorStats.addEventListener('click', function () {
+      var d = DetectorStats.snapshot();
+      d.registerBeat = {
+        rechazadosPorDedupDeFlash: metrics.flashDedupRejected,
+        rechazadosPorConsenso: metrics.consensusRejected,
+        aceptadosComoReal: metrics.beatsDetected
+      };
+      d.bloqueosDeTempo = tempoLockEvents;
+      d.pulsosPredichos = metrics.predictedPulses;
+      var text = JSON.stringify(d, null, 2);
+      var original = el.btnCopyDetectorStats.textContent;
+      navigator.clipboard.writeText(text).then(function () {
+        el.btnCopyDetectorStats.textContent = '¡Copiado!';
+        setTimeout(function () { el.btnCopyDetectorStats.textContent = original; }, 1500);
+      }).catch(function () {});
+    });
+
+    function refreshDiagnosticsPanel() {
+      var d = HardwareDetector.snapshot();
+      el.diagCamera.textContent = diagMark(d.camara);
+      el.diagGetUserMedia.textContent = diagMark(d.getUserMedia);
+      el.diagMediaStreamTrack.textContent = diagMark(d.mediaStreamTrack);
+      el.diagCapabilities.textContent = diagMark(d.getCapabilities);
+      el.diagTorchReported.textContent = diagMark(d.torchReportado);
+      el.diagTorchReal.textContent = diagMark(d.torchConfirmado);
+      el.diagFlashStatus.textContent = d.torchConfirmado ? '✓ LED confirmado' : '✗ Fallback pantalla';
+      el.diagFlashReason.textContent = d.torchConfirmado ? '—' : (d.flashFailureReason || 'Comprobando…');
+      el.diagWakeLock.textContent = diagMark(d.wakeLock);
+      el.diagVibration.textContent = diagMark(d.vibracion);
+      el.diagAudioContext.textContent = diagMark(d.audioContext);
+    }
+
+    el.btnCopyDiagnostics.addEventListener('click', function () {
+      var d = HardwareDetector.snapshot();
+      d.userAgent = navigator.userAgent;
+      var text = JSON.stringify(d, null, 2);
+      var original = el.btnCopyDiagnostics.textContent;
+      navigator.clipboard.writeText(text).then(function () {
+        el.btnCopyDiagnostics.textContent = '¡Copiado!';
+        setTimeout(function () { el.btnCopyDiagnostics.textContent = original; }, 1500);
+      }).catch(function () {});
+    });
+
+    function describeError(err) {
+      var name = err && err.name;
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        return 'Permiso denegado. Habilitá cámara y micrófono para este sitio en la configuración del navegador e intentá de nuevo.';
+      }
+      if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+        return 'No se encontró micrófono o cámara en este dispositivo.';
+      }
+      if (name === 'NotReadableError') {
+        return 'La cámara o el micrófono ya están siendo usados por otra aplicación.';
+      }
+      return 'No se pudo activar el micrófono y el flash. Intentá de nuevo.';
+    }
+
+    el.btnActivate.addEventListener('click', function () {
+      el.permissionError.hidden = true;
+      el.btnActivate.disabled = true;
+      el.btnActivate.textContent = 'Activando…';
+
+      navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        video: { facingMode: 'environment' }
+      })
+        .then(function (mediaStream) {
+          stream = mediaStream;
+          startSession();
+        })
+        .catch(function (err) {
+          el.permissionError.textContent = describeError(err);
+          el.permissionError.hidden = false;
+          el.btnActivate.disabled = false;
+          el.btnActivate.textContent = 'Activar';
+        });
+    });
+
+    function markTrackLost(label) {
+      // A lost track means the camera died THIS session — it says nothing
+      // about whether the device's hardware supports torch, so this does
+      // NOT overwrite the cached flashMode guess (see FlashController).
+      torchSupported = false;
+      el.torchBadge.textContent = label;
+      el.torchBadge.className = 'badge badge-warn';
+      refreshDiagnosticsPanel();
+    }
+
+    // Explicit third state so the badge never shows a confirmed-looking
+    // color while the real probe hasn't settled yet — a cached guess from
+    // last visit is still just a guess until probeTorch() resolves THIS
+    // session. Uses the plain neutral badge style (no success/warn tint)
+    // precisely so it can't be mistaken for a confirmed reading.
+    function setCheckingBadge() {
+      el.torchBadge.textContent = '🟡 Comprobando…';
+      el.torchBadge.className = 'badge';
+    }
+
+    function setTorchBadge(supported) {
+      torchSupported = supported;
+      if (supported) {
+        el.torchBadge.textContent = '🟢 Modo: Flash LED';
+        el.torchBadge.className = 'badge badge-success';
+      } else {
+        el.torchBadge.textContent = '🟠 Modo: Pantalla';
+        el.torchBadge.className = 'badge badge-warn';
+      }
+      refreshDiagnosticsPanel();
+    }
+
+    // Extra attempts beyond the first, with backoff — some phones are still
+    // reclaiming the camera resource right when the probe fires (fresh
+    // activation, or just back from being backgrounded); a toggle that
+    // fails now would often succeed 500-1500ms later. Two retries before
+    // giving up covers that without making a permanently-unsupported
+    // device wait needlessly long to see the SCREEN fallback.
+    var TORCH_PROBE_RETRY_DELAYS_MS = [500, 1000];
+
+    function describeTorchFailure(err) {
+      if (!videoTrack) return 'No hay cámara trasera disponible';
+      if (!videoTrack.applyConstraints) return 'El navegador no permite controlar el flash (applyConstraints no disponible)';
+      var name = err && err.name;
+      if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') return 'Torch no soportado por este dispositivo/navegador';
+      if (name === 'NotAllowedError' || name === 'SecurityError') return 'El navegador bloqueó el control del flash';
+      return 'applyConstraints rechazado' + (name ? ' (' + name + ')' : '');
+    }
+
+    function probeTorch(attempt) {
+      attempt = attempt || 0;
+      if (!videoTrack || !videoTrack.applyConstraints) {
+        lastFlashFailureReason = describeTorchFailure(null);
+        setTorchBadge(false);
+        return;
+      }
+      // Some Android devices (seen on Samsung's camera stack) report no
+      // "torch" capability via getCapabilities() even though the hardware
+      // supports it — trusting that report alone leaves the flash off on
+      // phones that could actually use it. Probing by actually toggling the
+      // constraint and reading whether the call succeeds is more reliable
+      // than trusting the advertised capabilities.
+      var probeStart = performance.now();
+      videoTrack.applyConstraints({ advanced: [{ torch: true }] })
+        .then(function () {
+          // Adapt timing to what this device's camera stack actually
+          // delivers: a slow torch round-trip (seen on some budget Android
+          // camera HALs) needs more breathing room, or fast beats end up
+          // queuing hardware commands faster than the camera can apply them.
+          var latency = performance.now() - probeStart;
+          TORCH_HOLD_MS = Math.max(70, Math.min(160, Math.round(latency * 1.2)));
+          BEAT_MIN_GAP_MS = Math.max(BEAT_MIN_GAP_MS, Math.round(latency * 2.5));
+          lastFlashFailureReason = null;
+          setTorchBadge(true);
+          // Cache the CONFIRMED result only — never the optimistic reset
+          // (setTorchBadge(false) at session start) or the seeded guess
+          // (FlashController.seedFromCache), so a false 'screen' write
+          // can't poison the cache before the real probe ever runs.
+          FlashController.cacheMode('torch');
+          return videoTrack.applyConstraints({ advanced: [{ torch: false }] });
+        })
+        .catch(function (err) {
+          if (attempt < TORCH_PROBE_RETRY_DELAYS_MS.length) {
+            var delay = TORCH_PROBE_RETRY_DELAYS_MS[attempt];
+            beatLog('torch: intento ' + (attempt + 1) + ' falló (' + (err && err.name) + ') — reintentando en ' + delay + 'ms');
+            setTimeout(function () {
+              // The tab may have been backgrounded during the wait (phone
+              // locked, app switched) — the visibilitychange handler already
+              // tears everything down on hide and re-probes on its own when
+              // the tab comes back, so retrying here would just fail against
+              // a camera that's no longer there and log a confusing error.
+              if (document.visibilityState !== 'visible') return;
+              probeTorch(attempt + 1);
+            }, delay);
+            return;
+          }
+          lastFlashFailureReason = describeTorchFailure(err);
+          setTorchBadge(false);
+          FlashController.cacheMode('screen');
+        });
+    }
+
+    function startSession() {
+      el.hiddenVideo.srcObject = stream;
+      el.hiddenVideo.play().catch(function () {});
+      videoTrack = stream.getVideoTracks()[0];
+      var audioTrack = stream.getAudioTracks()[0];
+
+      // Show "checking" — NEVER jump straight to a confirmed-looking green
+      // or orange badge before the real probe below actually runs. A cached
+      // guess from last visit is still just a guess until reconfirmed.
+      setCheckingBadge();
+      // Seed torchSupported (not the badge) from last session's CONFIRMED
+      // result, purely so beats in the first ~300ms still try the right
+      // hardware path instead of defaulting to screen — the real probe
+      // below is what updates both the badge and the cache, so a
+      // device/browser change self-corrects on the next probe instead of
+      // getting stuck on a stale guess.
+      FlashController.seedFromCache();
+      // Give the camera capture session a moment to fully settle before
+      // touching advanced constraints — probing immediately after
+      // getUserMedia resolves is a known source of false negatives on some
+      // Android camera stacks.
+      setTimeout(probeTorch, 300);
+
+      if (videoTrack) {
+        videoTrack.addEventListener('ended', function () { markTrackLost('Cámara perdida — reactivá'); });
+      }
+      if (audioTrack) {
+        audioTrack.addEventListener('ended', function () { markTrackLost('Micrófono perdido — reactivá'); });
+      }
+
+      requestWakeLock();
+
+      var AudioCtx = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AudioCtx();
+      var source = audioCtx.createMediaStreamSource(stream);
+
+      // Broadband tap — overall loudness (RMS), catches whatever is making
+      // the transient regardless of its frequency.
+      analyserBroad = audioCtx.createAnalyser();
+      analyserBroad.fftSize = 2048;
+      source.connect(analyserBroad);
+      timeData = new Uint8Array(analyserBroad.fftSize);
+
+      // Band-limited tap — isolates the kick/bass region (20-180Hz) with a
+      // real filter chain, then reads its spectral energy. Two independent
+      // onset detectors (broadband RMS + band FFT) voting together catch
+      // more real hits than either alone, without also doubling false
+      // positives, since a genuine kick usually shows up in both. Kept for
+      // the no-AudioWorklet fallback path.
+      var highpassNode = audioCtx.createBiquadFilter();
+      highpassNode.type = 'highpass';
+      highpassNode.frequency.value = 20;
+      var lowpassNode = audioCtx.createBiquadFilter();
+      lowpassNode.type = 'lowpass';
+      lowpassNode.frequency.value = 180;
+      source.connect(highpassNode);
+      highpassNode.connect(lowpassNode);
+      analyserBand = audioCtx.createAnalyser();
+      analyserBand.fftSize = 2048;
+      lowpassNode.connect(analyserBand);
+      freqData = new Uint8Array(analyserBand.frequencyBinCount);
+      // Only the first handful of bins carry real content after the
+      // highpass/lowpass chain — averaging the full spectrum would dilute
+      // the signal with hundreds of near-silent high-frequency bins.
+      bandBinCount = Math.max(1, Math.min(freqData.length, Math.ceil(250 / (audioCtx.sampleRate / 2 / freqData.length))));
+
+      // Two narrower sub-bands feed the worklet directly (native filters,
+      // essentially free) so it can tell a real kick — energy concentrated
+      // low — apart from a clap or voice that's merely loud.
+      var lowSplitHigh = audioCtx.createBiquadFilter();
+      lowSplitHigh.type = 'highpass';
+      lowSplitHigh.frequency.value = 20;
+      var lowSplitLow = audioCtx.createBiquadFilter();
+      lowSplitLow.type = 'lowpass';
+      lowSplitLow.frequency.value = 80;
+      source.connect(lowSplitHigh);
+      lowSplitHigh.connect(lowSplitLow);
+
+      var midSplitHigh = audioCtx.createBiquadFilter();
+      midSplitHigh.type = 'highpass';
+      midSplitHigh.frequency.value = 80;
+      var midSplitLow = audioCtx.createBiquadFilter();
+      midSplitLow.type = 'lowpass';
+      midSplitLow.frequency.value = 180;
+      source.connect(midSplitHigh);
+      midSplitHigh.connect(midSplitLow);
+
+      energyFast = 0;
+      energySlow = 0;
+      aboveThreshold = false;
+      peakLevel = THRESHOLD_FLOOR * 4;
+      regimeShiftSinceMs = 0;
+      bandFlux = 0;
+      bandFluxAvg = 0;
+      bandAboveThreshold = false;
+      prevBandLevel = 0;
+      lastRealBeatTime = 0;
+      lastFlashTime = 0;
+      beatIntervals = [];
+      beatStrengths = [];
+      consensusRejectionStreak = 0;
+      tempoLocked = false;
+      predictedIntervalMs = 0;
+      consecutivePredicted = 0;
+      lastLoggedBpm = null;
+      sessionStartTime = performance.now();
+      tempoLockEvents = [];
+      beatLog('— nueva sesión de escucha iniciada —');
+      if (predictedTimer) { clearTimeout(predictedTimer); predictedTimer = null; }
+      el.bpmValue.textContent = '—';
+      metrics = { beatsDetected: 0, predictedPulses: 0, torchLatencies: [], autoAdjust: null, flashDedupRejected: 0, consensusRejected: 0 };
+      DetectorStats.reset();
+      refreshMetricsPanel();
+      refreshDetectorPanel();
+
+      // Auto-calibration: listen for a moment before actively flashing, so
+      // the moving averages start from this room/song instead of a cold
+      // zero that takes a couple of seconds to catch up.
+      calibratingUntil = performance.now() + CALIBRATION_MS;
+      el.levelLabel.textContent = 'Calibrando micrófono…';
+
+      el.liveCodeLabel.textContent = 'Sesión ' + sessionCode;
+      el.btnActivate.disabled = false;
+      el.btnActivate.textContent = 'Activar';
+      showView('live');
+      startAnalysisClock(source, lowSplitLow, midSplitLow);
+    }
+
+    // --- Analysis engine: DSP runs inside the AudioWorklet -----------------
+    // Two reasons to move the actual math off the main thread, not just the
+    // clock: (1) rAF/the main thread is tied to the display and gets
+    // throttled or paused exactly when a phone sitting on a table during a
+    // party is likely to hit that; (2) on a weaker phone, running the RMS +
+    // hysteresis math ~90 times/sec competes with UI work (animations, GC)
+    // on the one thread that also has to stay responsive. The worklet
+    // receives two already-filtered audio taps natively (broadband + the
+    // 20-180Hz band from the biquad chain) and does the actual detection;
+    // it can't touch the DOM, so it only posts a message when there's a
+    // beat to act on, or a periodic snapshot for the level meter — the main
+    // thread's job shrinks to reacting to those messages and driving the
+    // camera/DOM, which is all it was ever allowed to do anyway.
+    var WORKLET_SRC = [
+      'class BeatProcessor extends AudioWorkletProcessor {',
+      '  constructor() {',
+      '    super();',
+      '    this.energyFast = 0;',
+      '    this.energySlow = 0;',
+      '    this.aboveOn = false;',
+      '    this.regimeShiftSince = 0;',
+      '    this.lastBeatAt = 0;',
+      '    this.userRatioMultiplier = 1;',
+      '    this.autoAdjust = 1;',
+      '    this.calibrationMs = 1200;',
+      '    this.calibrationEndsAt = -1;',
+      '    this.calibSum = 0;',
+      '    this.calibCount = 0;',
+      '    this.meterCounter = 0;',
+      // Dedicated mid-band (80-180Hz) onset via half-wave-rectified flux —
+      // only energy INCREASES count, a decaying tail after a hit is ignored.
+      '    this.prevMidRms = 0;',
+      '    this.midFluxFast = 0;',
+      '    this.midFluxSlow = 0;',
+      '    this.midAboveOn = false;',
+      // Same DetectorStats bookkeeping as the main-thread fallback path
+      // (analyzeTick) — see that side's declaration for the full
+      // reasoning. Synced to the main thread periodically via a "stats"
+      // message since this runs on its own thread and cannot share the
+      // object directly.
+      '    this.statsCounter = 0;',
+      '    this.framesProcessed = 0;',
+      '    this.broadThresholdCrossings = 0;',
+      '    this.bandThresholdCrossings = 0;',
+      '    this.candidateCount = 0;',
+      // Rastro crudo de rawCandidate — mismo propósito que su espejo en el
+      // main thread (ver DetectorStats.recordTrace): responder si un mismo
+      // golpe físico dispara más de un candidato (broadband y banda media
+      // por separado) antes de que el refractario/consenso lo filtren.
+      '    this.candidateTrace = [];',
+      '    this.lastTraceAt = 0;',
+      '    this.candidateIdCounter = 0;',
+      '    this.latchTrace = [];',
+      '    this.absoluteGateRejectedCount = 0;',
+      '    this.refractoryRejectedCount = 0;',
+      '    this.confirmedCount = 0;',
+      '    this.lastCandidateAt = 0;',
+      '    this.intervalHist = [0,0,0,0,0,0,0,0,0,0];',
+      '    this.broadSum = 0; this.broadSumSq = 0; this.broadCount = 0; this.broadMax = 0;',
+      '    this.bandSum = 0; this.bandSumSq = 0; this.bandCount = 0; this.bandMax = 0;',
+      // EXPERIMENTAL — noise gate absoluto. Este default solo cubre la
+      // ventanita entre que el processor arranca y "init" llega del hilo
+      // principal (normalmente un frame o dos) — el valor real siempre lo
+      // manda DetectorConfig.absoluteEnergyGate desde afuera, así que ya no
+      // hay un número duplicado y desincronizable acá dentro.
+      '    this.absoluteEnergyGate = 0.0125;',
+      '    var self = this;',
+      '    this.port.onmessage = function (e) {',
+      '      var d = e.data;',
+      '      if (!d) return;',
+      '      if (d.type === "init") {',
+      '        if (typeof d.ratioMultiplier === "number") self.userRatioMultiplier = d.ratioMultiplier;',
+      '        if (typeof d.calibrationMs === "number") self.calibrationMs = d.calibrationMs;',
+      '        if (typeof d.absoluteEnergyGate === "number") self.absoluteEnergyGate = d.absoluteEnergyGate;',
+      '      } else if (d.type === "sensitivity" && typeof d.ratioMultiplier === "number") {',
+      '        self.userRatioMultiplier = d.ratioMultiplier;',
+      '      }',
+      '    };',
+      '  }',
+      '  rms(channel) {',
+      '    if (!channel || !channel.length) return 0;',
+      '    var sum = 0;',
+      '    for (var i = 0; i < channel.length; i++) sum += channel[i] * channel[i];',
+      '    return Math.sqrt(sum / channel.length);',
+      '  }',
+      // Mirrors CANDIDATE_HIST_EDGES_MS on the main thread — kept in sync
+      // by hand since the worklet cannot import it.
+      '  bucketIndex(ms) {',
+      '    var edges = [100, 150, 200, 250, 300, 400, 500, 700, 1000];',
+      '    for (var i = 0; i < edges.length; i++) { if (ms < edges[i]) return i; }',
+      '    return edges.length;',
+      '  }',
+      '  process(inputs) {',
+      '    var broadCh = inputs[0] && inputs[0][0];',
+      '    if (!broadCh || !broadCh.length) return true;',
+      '    var lowCh = inputs[1] && inputs[1][0];',
+      '    var midCh = inputs[2] && inputs[2][0];',
+      '',
+      '    var rmsBroad = this.rms(broadCh);',
+      '    var rmsLow = this.rms(lowCh);',
+      '    var rmsMid = this.rms(midCh);',
+      '',
+      '    var now = currentTime * 1000;',
+      '    if (this.calibrationEndsAt < 0) this.calibrationEndsAt = now + this.calibrationMs;',
+      '',
+      // Auto-learning: derive a per-device nudge from what the raw mic
+      // actually delivers while the app is only listening (not yet
+      // flashing), instead of asking the user to find that out by hand.
+      '    if (now < this.calibrationEndsAt) {',
+      '      this.calibSum += rmsBroad;',
+      '      this.calibCount++;',
+      '    } else if (this.calibCount > 0) {',
+      '      var calibMean = this.calibSum / this.calibCount;',
+      '      var REFERENCE_RMS = 0.03;',
+      '      var adjust = calibMean > 0 ? calibMean / REFERENCE_RMS : 1;',
+      '      this.autoAdjust = Math.max(0.85, Math.min(1.3, adjust));',
+      '      this.calibCount = 0;',
+      '      this.port.postMessage({ type: "calibrated", mean: calibMean, autoAdjust: this.autoAdjust });',
+      '    }',
+      '',
+      '    var m = this.userRatioMultiplier * this.autoAdjust;',
+      '',
+      '    this.energyFast = this.energyFast === 0 ? rmsBroad : this.energyFast + 0.5 * (rmsBroad - this.energyFast);',
+      '',
+      '    var deviated = this.energySlow > 0 &&',
+      '      (this.energyFast / this.energySlow > 1.8 || this.energySlow / Math.max(this.energyFast, 1e-6) > 1.8);',
+      '    if (deviated) { if (!this.regimeShiftSince) this.regimeShiftSince = now; } else { this.regimeShiftSince = 0; }',
+      '    var slowAlpha = (this.regimeShiftSince && (now - this.regimeShiftSince > 700)) ? 0.15 : 0.03;',
+      '    this.energySlow = this.energySlow === 0 ? rmsBroad : this.energySlow + slowAlpha * (rmsBroad - this.energySlow);',
+      '',
+      '    var floor = 0.0025;',
+      '    var onRatio = 1 + 0.35 * m;',
+      '    var offRatio = 1 + 0.08 * m;',
+      '    var thresholdOn = Math.max(floor, this.energySlow * onRatio);',
+      '    var thresholdOff = Math.max(floor * 0.7, this.energySlow * offRatio);',
+      '',
+      // Distribution stats, gated by this worklet's OWN calibration flag so
+      // they line up with what the main thread will actually register
+      // (handleWorkletMessage separately drops "beat" messages that arrive
+      // during ITS calibration window, but never gated raw stats before).
+      '    var statsEnabled = now >= this.calibrationEndsAt;',
+      '    if (statsEnabled) {',
+      '      this.framesProcessed++;',
+      '      this.broadSum += this.energyFast; this.broadSumSq += this.energyFast * this.energyFast; this.broadCount++;',
+      '      if (this.energyFast > this.broadMax) this.broadMax = this.energyFast;',
+      '      if (this.energyFast > thresholdOn) this.broadThresholdCrossings++;',
+      '    }',
+      '',
+      '    var wasAboveOn = this.aboveOn;',
+      '    var broadRise = !this.aboveOn && this.energyFast > thresholdOn;',
+      '    if (broadRise) this.aboveOn = true;',
+      '    else if (this.aboveOn && this.energyFast < thresholdOff) this.aboveOn = false;',
+      '    if (statsEnabled && this.aboveOn !== wasAboveOn) {',
+      '      this.latchTrace.push({ tMs: Math.round(now), canal: "anchaBroad", direccion: this.aboveOn ? "sube" : "baja", valor: Math.round(this.energyFast * 10000) / 10000, on: Math.round(thresholdOn * 10000) / 10000, off: Math.round(thresholdOff * 10000) / 10000 });',
+      '      if (this.latchTrace.length > 30) this.latchTrace.shift();',
+      '    }',
+      '',
+      '    var midFluxRaw = Math.max(0, rmsMid - this.prevMidRms);',
+      '    this.prevMidRms = rmsMid;',
+      // Envolvente de ataque/release asimétrica — ver BAND_FLUX_RELEASE_ALPHA
+      // en el hilo principal para la explicación completa. Dentro de un
+      // mismo golpe físico, el flux crudo de 80-180Hz oscila con el propio
+      // ciclo de la onda (periodo ~5.5-12.5ms); un alpha simétrico de 0.5
+      // sigue esa oscilación casi entera y re-arma el latch varias veces
+      // por golpe. Ataque rápido (0.5, sin pérdida de latencia real) +
+      // release lento (0.07) para que no baje lo bastante rápido como para
+      // volver a cruzar midOff/midOn dentro del mismo golpe.
+      '    var midFluxAlpha = midFluxRaw > this.midFluxFast ? 0.5 : 0.07;',
+      '    this.midFluxFast = this.midFluxFast === 0 ? midFluxRaw : this.midFluxFast + midFluxAlpha * (midFluxRaw - this.midFluxFast);',
+      '    this.midFluxSlow = this.midFluxSlow === 0 ? midFluxRaw : this.midFluxSlow + slowAlpha * (midFluxRaw - this.midFluxSlow);',
+      '    var midFloor = floor * 0.6;',
+      '    var midOnRatio = 1 + 0.6 * m;',
+      '    var midOffRatio = 1 + 0.15 * m;',
+      '    var midOn = Math.max(midFloor, this.midFluxSlow * midOnRatio);',
+      '    var midOff = Math.max(midFloor * 0.7, this.midFluxSlow * midOffRatio);',
+      '',
+      '    if (statsEnabled) {',
+      '      this.bandSum += this.midFluxFast; this.bandSumSq += this.midFluxFast * this.midFluxFast; this.bandCount++;',
+      '      if (this.midFluxFast > this.bandMax) this.bandMax = this.midFluxFast;',
+      '      if (this.midFluxFast > midOn) this.bandThresholdCrossings++;',
+      '    }',
+      '',
+      '    var wasMidAboveOn = this.midAboveOn;',
+      '    var midRise = !this.midAboveOn && this.midFluxFast > midOn;',
+      '    if (midRise) this.midAboveOn = true;',
+      '    else if (this.midAboveOn && this.midFluxFast < midOff) this.midAboveOn = false;',
+      '    if (statsEnabled && this.midAboveOn !== wasMidAboveOn) {',
+      '      this.latchTrace.push({ tMs: Math.round(now), canal: "bandaMedia", direccion: this.midAboveOn ? "sube" : "baja", valor: Math.round(this.midFluxFast * 10000) / 10000, on: Math.round(midOn * 10000) / 10000, off: Math.round(midOff * 10000) / 10000 });',
+      '      if (this.latchTrace.length > 30) this.latchTrace.shift();',
+      '    }',
+      '',
+      // Classification: a real kick concentrates energy in the 20-180Hz
+      // range; a clap or voice that happens to be loud enough to trip the
+      // broadband gate spreads its energy much thinner down there. Only
+      // gates broadband-only triggers — anything the dedicated mid-band
+      // detector confirms is trusted outright. "Alta" sensitivity
+      // (multiplier <= 0.75) skips this check entirely and trusts loudness
+      // alone, for phones whose mic barely registers the low end at all.
+      '    var bassFraction = rmsBroad > 0 ? (rmsLow + rmsMid) / rmsBroad : 0;',
+      '    var looksLikeBass = bassFraction > 0.12 || this.userRatioMultiplier <= 0.75;',
+      '',
+      // Same condition as before, split into two named parts purely so the
+      // DetectorStats counting below can tell "never even a candidate"
+      // apart from "was a candidate, but the refractory period ate it" —
+      // functionally identical to the original single if-check.
+      '    var rawCandidate = midRise || (broadRise && looksLikeBass);',
+      '    var traceEntry = null;',
+      '    if (rawCandidate && statsEnabled) {',
+      '      var traceCanal = (midRise && broadRise && looksLikeBass) ? "ambos" : (midRise ? "bandaMedia" : "anchaBroad");',
+      '      var traceInterval = this.lastTraceAt > 0 ? Math.round(now - this.lastTraceAt) : null;',
+      '      this.candidateIdCounter++;',
+      '      traceEntry = {',
+      '        id: this.candidateIdCounter,',
+      '        tMs: Math.round(now),',
+      '        canal: traceCanal,',
+      '        energyFast: Math.round(this.energyFast * 10000) / 10000,',
+      '        energySlow: Math.round(this.energySlow * 10000) / 10000,',
+      '        flux: Math.round(this.midFluxFast * 10000) / 10000,',
+      '        umbralEnergia: Math.round(thresholdOn * 10000) / 10000,',
+      '        umbralFlux: Math.round(midOn * 10000) / 10000,',
+      '        intervaloDesdeAnterior: traceInterval,',
+      '        resultadoDetector: "pendiente"',
+      '      };',
+      '      this.candidateTrace.push(traceEntry);',
+      '      if (this.candidateTrace.length > 40) this.candidateTrace.shift();',
+      '      this.lastTraceAt = now;',
+      '    }',
+      // EXPERIMENTAL — this.absoluteEnergyGate arrives from the main thread
+      // via the "init" message (DetectorConfig.absoluteEnergyGate), so there
+      // is one tunable source of truth instead of a number duplicated by
+      // hand in this string. If raw broadband energy never reached this
+      // floor, nothing in the room made a real sound this frame — no
+      // relative threshold should be able to override that.
+      '    var passesAbsoluteGate = this.energyFast >= this.absoluteEnergyGate;',
+      '    if (rawCandidate && !passesAbsoluteGate && statsEnabled) {',
+      '      this.absoluteGateRejectedCount++;',
+      '      if (traceEntry) traceEntry.resultadoDetector = "rechazado_gate_absoluto";',
+      '    }',
+      '    var isCandidate = rawCandidate && passesAbsoluteGate;',
+      '    var refractoryOk = (now - this.lastBeatAt > 260);',
+      '    if (isCandidate && statsEnabled) {',
+      '      this.candidateCount++;',
+      '      if (this.lastCandidateAt > 0) { this.intervalHist[this.bucketIndex(now - this.lastCandidateAt)]++; }',
+      '      this.lastCandidateAt = now;',
+      '      if (refractoryOk) this.confirmedCount++; else this.refractoryRejectedCount++;',
+      '      if (traceEntry) traceEntry.resultadoDetector = refractoryOk ? "paso_a_registerBeat" : "rechazado_refractario_detector";',
+      '    }',
+      '    if (isCandidate && refractoryOk) {',
+      '      this.lastBeatAt = now;',
+      // Bass-region level at the moment of the hit rides along with the
+      // beat message — a real kick concentrates energy here; a hi-hat or
+      // snare ghost note riding on top of it mostly does not. The main
+      // thread uses this to tell a beat from a subdivision (see
+      // computeTempoEstimate / detectAccentAlternation). candidateId lets
+      // the main thread's registerBeat() log the FINAL fate of this exact
+      // candidate (dedup/consenso/REAL) back against rastreoCandidatos.
+      '      this.port.postMessage({ type: "beat", strength: rmsLow + rmsMid, candidateId: traceEntry ? traceEntry.id : null });',
+      '    }',
+      '',
+      '    this.statsCounter++;',
+      '    if (this.statsCounter >= 60) {',
+      '      this.statsCounter = 0;',
+      '      var broadMean = this.broadCount ? this.broadSum / this.broadCount : 0;',
+      '      var broadVar = this.broadCount ? Math.max(0, this.broadSumSq / this.broadCount - broadMean * broadMean) : 0;',
+      '      var bandMean = this.bandCount ? this.bandSum / this.bandCount : 0;',
+      '      var bandVar = this.bandCount ? Math.max(0, this.bandSumSq / this.bandCount - bandMean * bandMean) : 0;',
+      '      var elapsedSec = this.calibrationEndsAt >= 0 ? (now - this.calibrationEndsAt) / 1000 : 0;',
+      '      this.port.postMessage({',
+      '        type: "stats",',
+      '        sampleRate: sampleRate,',
+      '        callsPerSecond: elapsedSec > 0 ? Math.round(this.framesProcessed / elapsedSec) : null,',
+      '        framesProcessed: this.framesProcessed,',
+      '        broadThresholdCrossings: this.broadThresholdCrossings,',
+      '        bandThresholdCrossings: this.bandThresholdCrossings,',
+      '        candidates: this.candidateCount,',
+      '        absoluteGateRejected: this.absoluteGateRejectedCount,',
+      '        refractoryRejected: this.refractoryRejectedCount,',
+      '        confirmed: this.confirmedCount,',
+      '        intervalHist: this.intervalHist,',
+      '        broadEnergyStats: this.broadCount ? { mean: broadMean, max: this.broadMax, stddev: Math.sqrt(broadVar), count: this.broadCount } : null,',
+      '        bandFluxStats: this.bandCount ? { mean: bandMean, max: this.bandMax, stddev: Math.sqrt(bandVar), count: this.bandCount } : null,',
+      '        candidateTraceRecent: this.candidateTrace,',
+      '        latchTraceRecent: this.latchTrace',
+      '      });',
+      '    }',
+      '',
+      '    this.meterCounter++;',
+      '    if (this.meterCounter >= 4) {',
+      '      this.meterCounter = 0;',
+      '      this.port.postMessage({ type: "level", fast: this.energyFast, on: thresholdOn });',
+      '    }',
+      '    return true;',
+      '  }',
+      '}',
+      'registerProcessor("od-beat-processor", BeatProcessor);'
+    ].join('\n');
+
+    function stopAnalysisClock() {
+      if (workletNode) {
+        try { workletNode.port.onmessage = null; workletNode.disconnect(); } catch (e) {}
+        workletNode = null;
+      }
+      if (fallbackTimerId) { clearInterval(fallbackTimerId); fallbackTimerId = null; }
+    }
+
+    function startFallbackTimer() {
+      stopAnalysisClock();
+      // Only reached when AudioWorklet itself isn't available — keeps the
+      // app working via the older main-thread polling path instead of
+      // failing outright.
+      fallbackTimerId = setInterval(analyzeTick, 12);
+    }
+
+    function handleWorkletMessage(e) {
+      var d = e.data;
+      if (!d) return;
+      if (d.type === 'beat') {
+        var now = performance.now();
+        if (now < calibratingUntil) return;
+        registerBeat(now, typeof d.strength === 'number' ? d.strength : 0, d.candidateId);
+      } else if (d.type === 'level') {
+        updateLevelMeter(d.fast, d.on);
+      } else if (d.type === 'calibrated') {
+        metrics.autoAdjust = d.autoAdjust;
+        refreshMetricsPanel();
+      } else if (d.type === 'stats') {
+        DetectorStats.applyWorkletSnapshot({
+          sampleRate: d.sampleRate,
+          callsPerSecond: d.callsPerSecond,
+          framesProcessed: d.framesProcessed,
+          broadThresholdCrossings: d.broadThresholdCrossings,
+          bandThresholdCrossings: d.bandThresholdCrossings,
+          candidates: d.candidates,
+          absoluteGateRejected: d.absoluteGateRejected,
+          refractoryRejected: d.refractoryRejected,
+          confirmed: d.confirmed,
+          intervalHist: d.intervalHist,
+          broadEnergyStats: d.broadEnergyStats,
+          bandFluxStats: d.bandFluxStats,
+          candidateTraceRecent: d.candidateTraceRecent,
+          latchTraceRecent: d.latchTraceRecent
+        });
+        refreshDetectorPanel();
+      }
+    }
+
+    function startAnalysisClock(source, lowBandNode, midBandNode) {
+      if (!audioCtx.audioWorklet) { startFallbackTimer(); return; }
+      var blob = new Blob([WORKLET_SRC], { type: 'application/javascript' });
+      var url = URL.createObjectURL(blob);
+      audioCtx.audioWorklet.addModule(url)
+        .then(function () {
+          URL.revokeObjectURL(url);
+          if (!audioCtx || audioCtx.state === 'closed') return; // session ended while this was loading
+          workletNode = new AudioWorkletNode(audioCtx, 'od-beat-processor', { numberOfInputs: 3 });
+          workletNode.port.onmessage = handleWorkletMessage;
+          workletNode.port.postMessage({ type: 'init', ratioMultiplier: sensitivityMultiplier, calibrationMs: CALIBRATION_MS, absoluteEnergyGate: DetectorConfig.absoluteEnergyGate });
+          // The worklet only runs while it's part of a live graph reaching
+          // the destination. Route it through a zero-gain node so it stays
+          // scheduled without ever making the raw mic audio audible.
+          var silentGain = audioCtx.createGain();
+          silentGain.gain.value = 0;
+          source.connect(workletNode, 0, 0);      // input 0: broadband
+          lowBandNode.connect(workletNode, 0, 1); // input 1: 20-80Hz
+          midBandNode.connect(workletNode, 0, 2); // input 2: 80-180Hz
+          workletNode.connect(silentGain);
+          silentGain.connect(audioCtx.destination);
+        })
+        .catch(function () { startFallbackTimer(); });
+    }
+
+    // --- Beat engine: hybrid RMS + band-flux onset, with calibration and
+    // tempo prediction ---------------------------------------------------
+    // Two independent onset detectors vote on every frame:
+    //   1. Broadband RMS  — overall loudness, catches any percussive hit
+    //      regardless of its frequency (robust across musical styles).
+    //   2. Band spectral flux — energy rising specifically in the 20-180Hz
+    //      kick/bass region isolated by the highpass+lowpass chain, which
+    //      is a closer match to how professional onset detectors work.
+    // A hit on EITHER channel counts as a beat — real kicks usually show up
+    // on both, so this mostly adds recall without adding false positives.
+    var BEAT_MIN_GAP_MS = 260;
+    // Recent-history window for tempo estimation. Bumped up from the old
+    // cap of 8 so the accent-alternation check (computeTempoEstimate) has
+    // enough onsets to trust an alternating strong/weak pattern instead of
+    // reacting to two or three noisy samples.
+    var BEAT_HISTORY_MAX = 12;
+
+    function medianOf(arr) {
+      var sorted = arr.slice().sort(function (a, b) { return a - b; });
+      return sorted[Math.floor(sorted.length / 2)];
+    }
+
+    // Median-consensus validation (registerBeat): an isolated hit's
+    // resonant echo (a table ringing on after a knock) can land more than
+    // BEAT_MIN_GAP_MS after the last flash and still slip past that guard —
+    // but its timing won't match the RECENT RHYTHM. Comparing a candidate
+    // against a single last beat isn't robust — one bad interval becomes
+    // the new reference and can permanently desync everything downstream
+    // (verified by simulation before this was written). Comparing against
+    // the MEDIAN of several recent ACCEPTED intervals is: one outlier can't
+    // drag a median far, and a rejected candidate never enters the window,
+    // so it can't corrupt future comparisons either. MAX_CONSENSUS_REJECTIONS
+    // is the safety valve — if the window itself has gone stale (song
+    // paused and resumed on a new phase, a real tempo change), too many
+    // rejections in a row means "the reference is wrong", not "everything
+    // since has been spurious", so the next candidate is accepted and the
+    // window restarts fresh rather than getting stuck rejecting forever.
+    var MEDIAN_CONSENSUS_TOLERANCE = 0.20;
+    var MAX_CONSENSUS_REJECTIONS = 3;
+    var consensusRejectionStreak = 0;
+
+    var ENERGY_ALPHA_FAST = 0.5;
+    // El rastro de candidatos (V17-V21) mostró bandFlux subiendo y bajando
+    // del latch cada 3-30ms dentro de un ÚNICO golpe físico — no dos golpes
+    // reales, sino el propio ciclo de la onda dentro de la banda 80-180Hz
+    // (periodo ~5.5-12.5ms) haciendo que el flux crudo por-frame oscile, y
+    // bandFlux (alpha=0.5 simétrico) lo sigue casi entero en vez de actuar
+    // como envolvente de ataque. Fix: ataque rápido (sigue siendo 0.5, no
+    // se pierde latencia real de detección) pero RELEASE lento — así una
+    // vez que bandFlux sube con un golpe real, no baja lo bastante rápido
+    // como para volver a cruzar bandOff/bandOn dentro del mismo golpe.
+    // Validado por simulación (scratchpad/simulate-envelope-fix.js): con
+    // alpha simétrico, un solo golpe con ese ripple produce ~17 candidatos
+    // espurios; con este release asimétrico, produce exactamente 1 — y dos
+    // golpes reales genuinos (750ms u incluso 150ms aparte) se siguen
+    // detectando sin fusionarse.
+    var BAND_FLUX_RELEASE_ALPHA = 0.07;
+    var ENERGY_ALPHA_SLOW = 0.03;
+    // Continuous recalibration: the slow baseline normally crawls at
+    // ENERGY_ALPHA_SLOW so a single loud beat can't drag it upward. But a
+    // real regime change — phone moved closer to the speaker, volume
+    // knob turned up, a noisier room — should be adopted quickly, not over
+    // several seconds. If the fast average stays far from the slow baseline
+    // for a sustained stretch (not just the instant of one hit), snap the
+    // baseline toward it at a much faster rate until it settles again.
+    var ENERGY_ALPHA_SLOW_FAST = 0.15;
+    var REGIME_SHIFT_RATIO = 1.8;
+    var REGIME_SHIFT_SUSTAIN_MS = 700;
+    var regimeShiftSinceMs = 0;
+    var THRESHOLD_ON_RATIO = 1.35;
+    var THRESHOLD_OFF_RATIO = 1.08;
+    // Absolute floor just above a silent room's electrical noise floor — NOT
+    // a "typical music" level. With autoGainControl explicitly turned off
+    // (needed to keep transients intact), raw mic RMS on real phones came
+    // back far quieter than expected, so this stays tiny on purpose.
+    var THRESHOLD_FLOOR = 0.0025;
+    // EXPERIMENTAL — noise gate absoluto. THRESHOLD_FLOOR (arriba) es un piso
+    // sobre el UMBRAL relativo, no sobre la energía cruda: energySlow puede
+    // adaptarse hacia abajo hasta casi cero en silencio, y entonces cualquier
+    // micro-fluctuación por encima de ese piso ya lo cruza. Este segundo
+    // valor es del todo distinto: una energía mínima absoluta que, si no se
+    // supera, descarta cualquier candidato SIN IMPORTAR el umbral relativo.
+    //
+    // Única fuente de verdad, compartida por el fallback (usada directo) y
+    // el Worklet (recibida por postMessage 'init' — el Worklet corre en su
+    // propio hilo y no puede importar este archivo, así que YA NO queda un
+    // número duplicado y "quemado" dentro de WORKLET_SRC). Cambiar el valor
+    // acá alcanza para que ambos caminos lo usen.
+    //
+    // Este ×5 fue el causante de la regresión reportada en iPhone ("antes
+    // prendía bien, ahora apenas prende cada tanto"): como THRESHOLD_FLOOR
+    // mismo ya salió "más bajo de lo esperado" en teléfonos reales (ver su
+    // comentario arriba), un piso absoluto puesto en 5 VECES ese valor,
+    // nunca probado en un dispositivo real, terminó por encima de la
+    // energía real de los golpes de música en ese teléfono — el detector
+    // seguía viendo el ritmo bien (relativo), pero este gate lo descartaba
+    // ANTES de llegar a esa lógica, sin importar qué tan claro fuera el
+    // golpe. Bajado a ×1.5 (todavía por encima del ruido eléctrico de un
+    // cuarto en silencio, pero con mucho más margen para no tapar golpes
+    // reales) como default más seguro para un evento en vivo — un falso
+    // positivo ocasional es mucho menos grave que el flash quedándose
+    // callado. Seguí confirmando esto en el dispositivo real: con el panel
+    // de diagnóstico abierto durante música real, "Rechazados por gate
+    // absoluto (experimental)" debería quedarse cerca de 0; si sigue
+    // subiendo, bajá el multiplicador más (o poné 0 para desactivarlo del
+    // todo mientras se termina de calibrar con datos reales).
+    var DetectorConfig = {
+      absoluteEnergyGate: THRESHOLD_FLOOR * 1.5
+    };
+    var PEAK_DECAY = 0.985; // how fast the meter's auto-range relaxes after a loud moment
+    var BAND_FLUX_ON_RATIO = 1.5;
+    var BAND_FLUX_OFF_RATIO = 1.1;
+    var BPM_MIN = 50;
+    var BPM_MAX = 200;
+    var CALIBRATION_MS = 1200;
+
+    // Instrumentación de diagnóstico: deja un rastro en la consola del
+    // navegador de cada onset, cada re-cálculo de tempo y cada pulso
+    // predicho vs. real, para poder auditar una canción concreta donde el
+    // flash no siga bien el ritmo sin tener que releer el código. Poner en
+    // false apaga todo el logging sin tocar el resto del motor.
+    var DEBUG_BEAT = true;
+    function beatLog() {
+      if (!DEBUG_BEAT || !window.console || !console.log) return;
+      var args = Array.prototype.slice.call(arguments);
+      args.unshift('[beat ' + Math.round(performance.now()) + 'ms]');
+      console.log.apply(console, args);
+    }
+
+    // User-facing sensitivity: 1 = Normal (the tuned defaults above), >1 =
+    // Baja (needs a bigger rise, fewer false positives, may miss soft
+    // beats), <1 = Alta (smaller rise needed, catches more, may over-fire).
+    // Different phones' mics respond differently enough that no single
+    // fixed tuning suits all of them — this hands the user the one knob
+    // that actually varies by hardware.
+    var SENSITIVITY_PRESETS = { low: 1.3, normal: 1, high: 0.7 };
+    var sensitivityMultiplier = SENSITIVITY_PRESETS.normal;
+
+    // Rough, honestly-labelled performance metrics — not lab-grade, but
+    // enough to compare devices side by side while tuning on real hardware.
+    var metrics = { beatsDetected: 0, predictedPulses: 0, torchLatencies: [], autoAdjust: null, flashDedupRejected: 0, consensusRejected: 0 };
+
+    var energyFast = 0;
+    var energySlow = 0;
+    var aboveThreshold = false;
+    var peakLevel = THRESHOLD_FLOOR * 4; // seed so the meter isn't maxed out by the first tiny sample
+    var prevBandLevel = 0;
+    var bandFlux = 0;
+    var bandFluxAvg = 0;
+    var bandAboveThreshold = false;
+    var bandBinCount = 8;
+    var calibratingUntil = 0;
+
+    // --- Tempo prediction ----------------------------------------------
+    // Once recent beat intervals agree on a tempo, schedule the next flash
+    // ahead of time so a single quiet/missed hit doesn't break the rhythm —
+    // if a real beat arrives first, it re-syncs the phase; if too many
+    // predictions pass with no real beat confirming them, prediction backs
+    // off (song likely stopped or changed).
+    var tempoLocked = false;
+    var predictedIntervalMs = 0;
+    var predictedTimer = null;
+    var consecutivePredicted = 0;
+    var MAX_CONSECUTIVE_PREDICTED = 4;
+    // Marca de tiempo del inicio de la sesión (para poder loguear "cuánto
+    // tardó en lockear" en vez de solo un timestamp absoluto).
+    var sessionStartTime = 0;
+    // Historial de los últimos momentos en que tempoLocked pasó de false a
+    // true — permite auditar si el sistema lockea con muy poca evidencia
+    // (pocos intervalos, alta dispersión) apenas arranca la sesión.
+    var TEMPO_LOCK_EVENTS_MAX = 10;
+    var tempoLockEvents = [];
+    // Último BPM logueado — solo para no repetir la misma línea de "cambio
+    // de tempo" en cada onset cuando la estimación no se movió.
+    var lastLoggedBpm = null;
+
+    // Real beat one octave down from a systematic subdivision misread only
+    // gets caught by looking at ACCENT, not timing. Two intervals that are
+    // both internally consistent (all ~250ms, or all ~500ms after doubling
+    // every reading) score identically well on a pure clustering test — the
+    // fold below can rescue an isolated outlier against an already-correct
+    // median, but if EVERY interval is a hi-hat instead of a beat, nothing
+    // looks like an outlier and a timing-only test can't tell which octave
+    // is real. A real kick concentrates energy in the bass; the hi-hats or
+    // ghost notes riding between kicks mostly don't, so an alternating
+    // strong/weak pattern in onset strength is the one honest signal that
+    // breaks the tie. Needs several onsets before trusting the pattern, and
+    // a clear gap between the two groups' averages — a steady four-on-the-
+    // floor kick (every onset similarly loud) must NOT trigger this.
+    function detectAccentAlternation(strengths) {
+      if (strengths.length < 6) return null;
+      var even = [], odd = [];
+      strengths.forEach(function (s, i) { (i % 2 === 0 ? even : odd).push(s); });
+      var avg = function (arr) { return arr.reduce(function (a, b) { return a + b; }, 0) / arr.length; };
+      var evenAvg = avg(even), oddAvg = avg(odd);
+      if (!(evenAvg > 0) || !(oddAvg > 0)) return null;
+      var ratio = evenAvg > oddAvg ? evenAvg / oddAvg : oddAvg / evenAvg;
+      if (ratio < 1.6) return null;
+      return true;
+    }
+
+    function computeTempoEstimate() {
+      var wasLocked = tempoLocked;
+      if (beatIntervals.length < 4) {
+        tempoLocked = false;
+        beatLog('tempo: esperando más onsets (' + beatIntervals.length + '/4 mínimo)');
+        return;
+      }
+      var median = medianOf(beatIntervals);
+      if (!(median > 0)) { tempoLocked = false; return; }
+      // Fold obvious double/half-tempo readings onto the same scale before
+      // re-measuring how tightly everything agrees. This only rescues
+      // ISOLATED outliers near 2x/0.5x an already-correct median — it does
+      // NOT fix a systematic subdivision misread (see the accent check below).
+      var folded = beatIntervals.map(function (iv) {
+        if (Math.abs(iv - median * 2) / (median * 2) < 0.15) return iv / 2;
+        if (Math.abs(iv - median / 2) / (median / 2) < 0.15) return iv * 2;
+        return iv;
+      });
+      var foldedMedian = medianOf(folded);
+      if (!(foldedMedian > 0)) { tempoLocked = false; return; }
+      var agree = folded.filter(function (iv) { return Math.abs(iv - foldedMedian) / foldedMedian < 0.12; }).length;
+      var agreePct = Math.round((agree / folded.length) * 100);
+
+      predictedIntervalMs = foldedMedian;
+      tempoLocked = (agree / folded.length) >= 0.6;
+
+      // Octave check: if the recent onsets alternate strong/weak, the real
+      // beat sits between same-accent (strong) onsets — twice the interval
+      // just computed. Only adopt it if the doubled tempo is still a
+      // plausible song tempo; otherwise keep the timing-only estimate.
+      var accentDetected = tempoLocked && !!detectAccentAlternation(beatStrengths);
+      var octaveCorrected = false;
+      if (accentDetected) {
+        var doubled = foldedMedian * 2;
+        var doubledBpm = 60000 / doubled;
+        if (doubledBpm >= BPM_MIN && doubledBpm <= BPM_MAX) {
+          predictedIntervalMs = doubled;
+          octaveCorrected = true;
+        }
+      }
+
+      var finalBpm = Math.round(60000 / predictedIntervalMs);
+
+      // Audita el instante exacto del lock: cuántos intervalos hicieron
+      // falta, con qué dispersión, y cuánto tiempo pasó desde el arranque de
+      // la sesión — para poder distinguir "lockeó sobre un ritmo real
+      // sostenido" de "lockeó apenas con 4 intervalos de ruido ambiente".
+      if (!wasLocked && tempoLocked) {
+        var foldedMean = folded.reduce(function (a, b) { return a + b; }, 0) / folded.length;
+        var foldedVariance = folded.reduce(function (a, b) { return a + (b - foldedMean) * (b - foldedMean); }, 0) / folded.length;
+        var deviationPct = foldedMean > 0 ? Math.round((Math.sqrt(foldedVariance) / foldedMean) * 1000) / 10 : null;
+        tempoLockEvents.push({
+          tDesdeInicioMs: sessionStartTime > 0 ? Math.round(performance.now() - sessionStartTime) : null,
+          intervalosUsados: beatIntervals.length,
+          bpmCalculado: finalBpm,
+          desviacionPct: deviationPct,
+          acuerdoPct: agreePct
+        });
+        if (tempoLockEvents.length > TEMPO_LOCK_EVENTS_MAX) tempoLockEvents.shift();
+        refreshDetectorPanel();
+      }
+
+      beatLog(
+        'tempo: intervalos=' + beatIntervals.map(function (iv) { return Math.round(iv); }).join(',') + 'ms',
+        '| medianaCruda=' + Math.round(median) + 'ms',
+        '| medianaPlegada=' + Math.round(foldedMedian) + 'ms (' + agreePct + '% de acuerdo)',
+        '| acentoAlternado=' + accentDetected + (octaveCorrected ? ' → octava corregida x2' : ''),
+        '| tempoLocked=' + tempoLocked,
+        '| BPM final=' + finalBpm,
+        '| intervalo final=' + Math.round(predictedIntervalMs) + 'ms'
+      );
+      if (tempoLocked && finalBpm !== lastLoggedBpm) {
+        beatLog('★ CAMBIO DE TEMPO: ' + (lastLoggedBpm === null ? '(primer lock)' : lastLoggedBpm + ' BPM →') + ' ' + finalBpm + ' BPM');
+        lastLoggedBpm = finalBpm;
+      } else if (!tempoLocked && lastLoggedBpm !== null) {
+        beatLog('★ TEMPO PERDIDO: dejó de estar tempoLocked (último BPM confiable: ' + lastLoggedBpm + ')');
+        lastLoggedBpm = null;
+      }
+    }
+
+    function scheduleNextPrediction() {
+      if (predictedTimer) { clearTimeout(predictedTimer); predictedTimer = null; }
+      if (!tempoLocked) return;
+      if (consecutivePredicted >= MAX_CONSECUTIVE_PREDICTED) {
+        // computeTempoEstimate() only ever runs from a fresh onset — if
+        // onsets stop coming entirely (real silence, or the room/mic noise
+        // that seeded a spurious lock has died down), it never runs again,
+        // and tempoLocked / the BPM readout were left frozen forever. This
+        // is the one place that already notices "too many predictions in a
+        // row with nothing real confirming any of them" — use it to also
+        // declare the tempo invalid and go back to an honest "sin BPM"
+        // instead of just quietly stopping the flash predictions while the
+        // stale number stays on screen.
+        tempoLocked = false;
+        predictedIntervalMs = 0;
+        beatIntervals = [];
+        beatStrengths = [];
+        consensusRejectionStreak = 0;
+        el.bpmValue.textContent = '—';
+        if (lastLoggedBpm !== null) {
+          beatLog('★ TEMPO PERDIDO: ' + MAX_CONSECUTIVE_PREDICTED + ' pulsos predichos seguidos sin confirmar — se descarta (último BPM: ' + lastLoggedBpm + ')');
+          lastLoggedBpm = null;
+        }
+        return;
+      }
+      predictedTimer = setTimeout(function () {
+        consecutivePredicted++;
+        metrics.predictedPulses++;
+        refreshMetricsPanel();
+        // Solo tocamos lastFlashTime (para el dedupe de flashes), NUNCA
+        // lastRealBeatTime — un pulso predicho no es un dato de tempo real,
+        // así que no debe poder ensuciar beatIntervals ni el debounce del
+        // detector.
+        lastFlashTime = performance.now();
+        beatLog('pulso PREDICHO (sin onset real que lo confirme) #' + consecutivePredicted + '/' + MAX_CONSECUTIVE_PREDICTED + ' — intervalo=' + Math.round(predictedIntervalMs) + 'ms');
+        FlashController.pulse('PREDICTED');
+        scheduleNextPrediction();
+      }, predictedIntervalMs);
+    }
+
+    function registerBeat(now, strength, candidateId) {
+      // Guard anti doble-flash: si este onset real llega pegado a un flash
+      // que ya disparamos hace un instante (real o predicho), es casi
+      // seguro el MISMO golpe, no uno nuevo. Antes esto no se filtraba: el
+      // pulso predicho pisaba el reloj compartido justo antes de que
+      // llegara el onset real del mismo golpe, ese onset medía un
+      // intervalo casi nulo (corrompiendo beatIntervals) y encima disparaba
+      // un segundo flash visible — exactamente el síntoma de "el flash se
+      // dispara más rápido que el BPM mostrado".
+      if (lastFlashTime > 0 && now - lastFlashTime < BEAT_MIN_GAP_MS) {
+        beatLog('onset REAL descartado — a ' + Math.round(now - lastFlashTime) + 'ms del último flash, se toma como el mismo golpe (sin segundo flash, sin ensuciar el tempo)');
+        consecutivePredicted = 0;
+        metrics.flashDedupRejected++;
+        DetectorStats.recordPipelineOutcome(candidateId, 'rechazado_dedup_flash');
+        refreshDetectorPanel();
+        return;
+      }
+
+      var interval = lastRealBeatTime > 0 ? (now - lastRealBeatTime) : null;
+
+      // See MEDIAN_CONSENSUS_TOLERANCE's declaration for the full reasoning.
+      // Needs a handful of prior ACCEPTED beats to have a meaningful
+      // median — with no rhythm established yet (silence, or the first few
+      // hits of a session) there's nothing to compare against, so this
+      // can't catch an isolated hit's echoes on a cold start; it only
+      // guards an ALREADY-running rhythm against a spurious interruption.
+      if (interval !== null && beatIntervals.length >= 4) {
+        var consensus = medianOf(beatIntervals);
+        var withinConsensus = consensus > 0 && Math.abs(interval - consensus) / consensus < MEDIAN_CONSENSUS_TOLERANCE;
+        if (!withinConsensus) {
+          if (consensusRejectionStreak < MAX_CONSENSUS_REJECTIONS) {
+            consensusRejectionStreak++;
+            metrics.consensusRejected++;
+            DetectorStats.recordPipelineOutcome(candidateId, 'rechazado_consenso');
+            refreshDetectorPanel();
+            beatLog('onset REAL descartado por consenso — intervalo=' + Math.round(interval) + 'ms no coincide con la mediana reciente (' + Math.round(consensus) + 'ms) — racha de rechazos=' + consensusRejectionStreak + '/' + MAX_CONSENSUS_REJECTIONS);
+            return;
+          }
+          beatLog('onset REAL aceptado tras ' + consensusRejectionStreak + ' rechazos seguidos por consenso — se asume un cambio real de ritmo y se reinicia la ventana');
+          beatIntervals = [];
+        }
+      }
+      consensusRejectionStreak = 0;
+
+      metrics.beatsDetected++;
+      DetectorStats.recordPipelineOutcome(candidateId, 'ACEPTADO_REAL');
+      DetectorStats.recordAcceptedReal(candidateId, interval);
+      refreshMetricsPanel();
+      refreshDetectorPanel();
+      consecutivePredicted = 0;
+      if (interval !== null && interval < 2000) {
+        beatIntervals.push(interval);
+        if (beatIntervals.length > BEAT_HISTORY_MAX) beatIntervals.shift();
+      }
+      beatLog(
+        'onset REAL #' + metrics.beatsDetected,
+        interval === null ? '(primer onset de la sesión)' : '| intervalo desde el anterior=' + Math.round(interval) + 'ms',
+        '| fuerza(graves)=' + (typeof strength === 'number' ? strength.toFixed(4) : 'n/d')
+      );
+      beatStrengths.push(typeof strength === 'number' ? strength : 0);
+      if (beatStrengths.length > BEAT_HISTORY_MAX) beatStrengths.shift();
+      lastRealBeatTime = now;
+      lastFlashTime = now;
+      FlashController.pulse('REAL');
+      updateBpmReadout();
+      computeTempoEstimate();
+      scheduleNextPrediction();
+    }
+
+    // Shared by both the worklet-message path and the fallback poller, so
+    // the meter behaves identically regardless of which one is driving it.
+    function updateLevelMeter(fast, onThreshold) {
+      // Auto-ranging: scale against the loudest recent moment rather than a
+      // fixed guess, so the bar reads sensibly whether the raw mic signal
+      // tops out at 0.05 or at 0.4 — that varies a lot by phone.
+      if (fast > peakLevel) { peakLevel = fast; } else { peakLevel *= PEAK_DECAY; }
+      peakLevel = Math.max(peakLevel, THRESHOLD_FLOOR * 4);
+
+      el.levelFill.style.width = Math.min(100, (fast / peakLevel) * 100) + '%';
+      el.levelThreshold.style.left = Math.min(100, (onThreshold / peakLevel) * 100) + '%';
+
+      if (performance.now() >= calibratingUntil && el.levelLabel.textContent !== 'Nivel de audio captado') {
+        el.levelLabel.textContent = 'Nivel de audio captado';
+      }
+    }
+
+    function analyzeTick() {
+      try {
+        if (!analyserBroad || !analyserBand || !audioCtx) return;
+        if (audioCtx.state === 'suspended') { audioCtx.resume().catch(function () {}); }
+
+        var now = performance.now();
+
+        // --- Channel 1: broadband RMS ---
+        analyserBroad.getByteTimeDomainData(timeData);
+        var sumSquares = 0;
+        for (var i = 0; i < timeData.length; i++) {
+          var v = (timeData[i] - 128) / 128;
+          sumSquares += v * v;
+        }
+        var rms = Math.sqrt(sumSquares / timeData.length);
+
+        energyFast = energyFast === 0 ? rms : energyFast + ENERGY_ALPHA_FAST * (rms - energyFast);
+
+        // Continuous recalibration: judge a regime shift from energyFast
+        // (already damped over a couple of ticks) against the established
+        // baseline, NOT from the raw instantaneous rms — a single kick drum
+        // hit spikes rms too, but decays back within a tick or two, so it
+        // can never hold "deviated" true for the full sustain window below.
+        // Only a real, lasting level change (distance, volume, ambient
+        // noise) does that, and earns the fast snap.
+        var deviated = energySlow > 0 &&
+          (energyFast / energySlow > REGIME_SHIFT_RATIO || energySlow / Math.max(energyFast, 1e-6) > REGIME_SHIFT_RATIO);
+        if (deviated) { if (!regimeShiftSinceMs) regimeShiftSinceMs = now; } else { regimeShiftSinceMs = 0; }
+        var slowAlpha = (regimeShiftSinceMs && (now - regimeShiftSinceMs > REGIME_SHIFT_SUSTAIN_MS))
+          ? ENERGY_ALPHA_SLOW_FAST
+          : ENERGY_ALPHA_SLOW;
+
+        energySlow = energySlow === 0 ? rms : energySlow + slowAlpha * (rms - energySlow);
+
+        var onRatio = 1 + (THRESHOLD_ON_RATIO - 1) * sensitivityMultiplier;
+        var offRatio = 1 + (THRESHOLD_OFF_RATIO - 1) * sensitivityMultiplier;
+        var thresholdOn = Math.max(THRESHOLD_FLOOR, energySlow * onRatio);
+        var thresholdOff = Math.max(THRESHOLD_FLOOR * 0.7, energySlow * offRatio);
+
+        // --- Channel 2: band spectral flux (20-180Hz, via the filter chain) ---
+        analyserBand.getByteFrequencyData(freqData);
+        var bandSum = 0;
+        for (var j = 0; j < bandBinCount; j++) bandSum += freqData[j];
+        var bandLevel = bandSum / bandBinCount;
+        var flux = Math.max(0, bandLevel - prevBandLevel); // only rising energy counts as onset
+        prevBandLevel = bandLevel;
+
+        // Envolvente de ataque/release asimétrica — ver BAND_FLUX_RELEASE_ALPHA.
+        var bandFluxAlpha = flux > bandFlux ? ENERGY_ALPHA_FAST : BAND_FLUX_RELEASE_ALPHA;
+        bandFlux = bandFlux === 0 ? flux : bandFlux + bandFluxAlpha * (flux - bandFlux);
+        // Same fast-snap treatment, sharing the one regime-shift detector
+        // above since both channels hear the same physical room.
+        bandFluxAvg = bandFluxAvg === 0 ? flux : bandFluxAvg + slowAlpha * (flux - bandFluxAvg);
+        var bandOnRatio = 1 + (BAND_FLUX_ON_RATIO - 1) * sensitivityMultiplier;
+        var bandOffRatio = 1 + (BAND_FLUX_OFF_RATIO - 1) * sensitivityMultiplier;
+        var bandOn = Math.max(1, bandFluxAvg * bandOnRatio);
+        var bandOff = Math.max(0.6, bandFluxAvg * bandOffRatio);
+
+        updateLevelMeter(energyFast, thresholdOn);
+
+        var calibrating = now < calibratingUntil;
+
+        // Distribution stats over EVERY tick, not just candidates — this is
+        // what answers "is thresholdOn/thresholdOff calibrated sanely for
+        // what the mic is actually hearing" independent of anything
+        // downstream ever firing.
+        if (!calibrating) DetectorStats.recordFallbackSample(energyFast, bandFlux, energyFast > thresholdOn, bandFlux > bandOn);
+
+        var wasAboveThreshold = aboveThreshold;
+        var broadRise = !aboveThreshold && energyFast > thresholdOn;
+        if (broadRise) aboveThreshold = true;
+        else if (aboveThreshold && energyFast < thresholdOff) aboveThreshold = false;
+        if (!calibrating && aboveThreshold !== wasAboveThreshold) {
+          DetectorStats.recordLatchTransition(now, 'anchaBroad', aboveThreshold ? 'sube' : 'baja', energyFast, thresholdOn, thresholdOff);
+        }
+
+        var wasBandAboveThreshold = bandAboveThreshold;
+        var bandRise = !bandAboveThreshold && bandFlux > bandOn;
+        if (bandRise) bandAboveThreshold = true;
+        else if (bandAboveThreshold && bandFlux < bandOff) bandAboveThreshold = false;
+        if (!calibrating && bandAboveThreshold !== wasBandAboveThreshold) {
+          DetectorStats.recordLatchTransition(now, 'bandaMedia', bandAboveThreshold ? 'sube' : 'baja', bandFlux, bandOn, bandOff);
+        }
+
+        var rawCandidate = broadRise || bandRise;
+        var traceEntry = null;
+        if (rawCandidate && !calibrating) {
+          var traceCanal = (broadRise && bandRise) ? 'ambos' : (broadRise ? 'anchaBroad' : 'bandaMedia');
+          traceEntry = DetectorStats.recordTrace(now, traceCanal, energyFast, energySlow, bandFlux, thresholdOn, bandOn);
+        }
+        // EXPERIMENTAL — ver DetectorConfig.absoluteEnergyGate arriba: si la
+        // energía cruda no alcanza ese piso, no cuenta como candidato pase lo
+        // que pase con el umbral relativo (que en silencio puede haberse
+        // adaptado casi a cero y volverse trivial de cruzar).
+        var passesAbsoluteGate = energyFast >= DetectorConfig.absoluteEnergyGate;
+        if (rawCandidate && !passesAbsoluteGate && !calibrating) {
+          DetectorStats.recordAbsoluteGateRejection();
+          if (traceEntry) traceEntry.resultadoDetector = 'rechazado_gate_absoluto';
+          refreshDetectorPanel();
+        }
+        var isCandidate = rawCandidate && passesAbsoluteGate;
+        var isOnset = isCandidate && now - lastRealBeatTime > BEAT_MIN_GAP_MS;
+        if (isCandidate && !calibrating) {
+          DetectorStats.recordFallbackCandidate(now, isOnset);
+          if (traceEntry) traceEntry.resultadoDetector = isOnset ? 'paso_a_registerBeat' : 'rechazado_refractario_detector';
+          refreshDetectorPanel();
+        }
+        if (isOnset && !calibrating) {
+          // bandLevel is this same 20-180Hz tap's absolute level — the
+          // fallback path's equivalent of the worklet's rmsLow+rmsMid.
+          registerBeat(now, bandLevel, traceEntry ? traceEntry.id : null);
+        }
+      } catch (e) {}
+    }
+
+    function updateBpmReadout() {
+      if (beatIntervals.length >= 3) {
+        var avg = beatIntervals.reduce(function (a, b) { return a + b; }, 0) / beatIntervals.length;
+        var bpm = Math.round(60000 / avg);
+        if (bpm >= BPM_MIN && bpm <= BPM_MAX) {
+          el.bpmValue.textContent = String(bpm);
+        }
+      }
+    }
+
+    function spawnSonarRing() {
+      var ring = document.createElement('span');
+      ring.className = 'sonar-ring';
+      el.pulseWrap.appendChild(ring);
+      ring.addEventListener('animationend', function () { ring.remove(); });
+    }
+
+    // --- Flash control: explicit state machine ------------------------
+    // OFF -> TURNING_ON -> ON -> TURNING_OFF -> OFF. A new pulse request
+    // while in either TURNING_* state is dropped outright rather than
+    // queued: sending a fresh ON/OFF constraint while the camera controller
+    // is still applying the previous one is exactly what leaves some
+    // Android camera stacks stuck. Only from a settled ON state do we
+    // "extend" the hold instead of issuing a redundant command.
+    var TORCH_HOLD_MS = 90;
+    var TorchState = { OFF: 'off', TURNING_ON: 'turning_on', ON: 'on', TURNING_OFF: 'turning_off' };
+    var torchState = TorchState.OFF;
+    var torchOffTimer = null;
+    // Timestamp of the most recent beat that asked for the torch, updated on
+    // EVERY pulseTorch() call regardless of torchState. Without this, a beat
+    // that lands mid-transition (see the two guards below) was silently
+    // dropped: nothing recorded that it happened, so the hold got armed
+    // relative to when the in-flight command settled instead of relative to
+    // the latest beat — on a song with dense, irregular onsets (Hey Jude's
+    // piano/voice/claps instead of a steady kick) enough beats land inside
+    // that transition window that the torch visibly blips off between them.
+    var lastBeatRequestAt = 0;
+    // Set when a beat arrives while an OFF command is already in flight —
+    // that command can't be cancelled once applyConstraints() is called, so
+    // this flags "turn it right back on the instant OFF settles" instead of
+    // showing a real, visible off-blip before the next beat starts a whole
+    // fresh ON cycle.
+    var reOnPendingAfterOff = false;
+
+    function commitTorchOff() {
+      torchOffTimer = null;
+      if (!videoTrack || torchState !== TorchState.ON) { torchState = TorchState.OFF; return; }
+      torchState = TorchState.TURNING_OFF;
+      videoTrack.applyConstraints({ advanced: [{ torch: false }] })
+        .then(function () {
+          torchState = TorchState.OFF;
+          if (reOnPendingAfterOff) {
+            reOnPendingAfterOff = false;
+            beatLog('FLASH', 'reencendido inmediato — un beat llegó mientras el comando OFF ya estaba en vuelo');
+            pulseTorch('REIGNITE');
+          }
+        })
+        .catch(function () {
+          torchState = TorchState.OFF;
+          if (reOnPendingAfterOff) { reOnPendingAfterOff = false; pulseTorch('REIGNITE'); }
+        });
+    }
+
+    function pulseTorch(source) {
+      if (!videoTrack) return;
+      lastBeatRequestAt = performance.now();
+      if (torchState === TorchState.ON) {
+        // Already lit from the previous beat — extend the hold instead of
+        // sending another ON. Physically this does NOT toggle the torch a
+        // second time, but it's still worth logging: if this fires a lot,
+        // two flash requests are landing close enough together that they're
+        // merging into one continuous light instead of a visible blink-blink.
+        beatLog('FLASH', 'origen=' + source, 't=' + performance.now().toFixed(0), '(ya encendido — se extiende el hold, no se re-enciende)');
+        if (torchOffTimer) clearTimeout(torchOffTimer);
+        torchOffTimer = setTimeout(commitTorchOff, TORCH_HOLD_MS);
+        return;
+      }
+      if (torchState === TorchState.TURNING_OFF) {
+        // Can't cancel a command already sent to the hardware — flag it so
+        // commitTorchOff's .then() re-lights the instant it settles, rather
+        // than dropping this beat and letting the torch actually go dark.
+        beatLog('FLASH', 'origen=' + source, 't=' + performance.now().toFixed(0), '(OFF en vuelo — se pide reencendido inmediato al asentar)');
+        reOnPendingAfterOff = true;
+        return;
+      }
+      if (torchState === TorchState.TURNING_ON) {
+        // Already turning on for an earlier beat. This beat just means
+        // "keep it lit a bit longer" — lastBeatRequestAt above already
+        // banked that; the ON branch's .then() below re-derives the hold
+        // from it once the transition settles, so there's nothing more to
+        // do here except not overlap a second ON command mid-flight.
+        beatLog('FLASH', 'origen=' + source, 't=' + performance.now().toFixed(0), '(ON en vuelo — se cuenta para extender el hold al asentar)');
+        return;
+      }
+      // torchState === OFF
+      beatLog('FLASH', 'origen=' + source, 't=' + performance.now().toFixed(0));
+      torchState = TorchState.TURNING_ON;
+      var pulseStart = performance.now();
+      videoTrack.applyConstraints({ advanced: [{ torch: true }] })
+        .then(function () {
+          metrics.torchLatencies.push(performance.now() - pulseStart);
+          if (metrics.torchLatencies.length > 40) metrics.torchLatencies.shift();
+          refreshMetricsPanel();
+          torchState = TorchState.ON;
+          // Arm the hold from the LATEST beat request, not from "now" — if
+          // more beats arrived while this ON command was still in flight,
+          // they were banked into lastBeatRequestAt above and should still
+          // count toward keeping the torch lit, not get silently dropped.
+          var sinceLastBeat = performance.now() - lastBeatRequestAt;
+          torchOffTimer = setTimeout(commitTorchOff, Math.max(0, TORCH_HOLD_MS - sinceLastBeat));
+        })
+        .catch(function () { torchState = TorchState.OFF; });
+    }
+
+    function triggerFlashPulse(source) {
+      source = source || 'DESCONOCIDO';
+      el.pulseCore.style.transform = 'scale(1.1)';
+      el.pulseCore.style.boxShadow = '0 0 24px 4px color-mix(in oklch, var(--accent) 65%, transparent)';
+      setTimeout(function () {
+        el.pulseCore.style.transform = 'scale(1)';
+        el.pulseCore.style.boxShadow = '0 0 0 0 color-mix(in oklch, var(--accent) 0%, transparent)';
+      }, 180);
+      spawnSonarRing();
+
+      if (torchSupported && videoTrack) {
+        pulseTorch(source);
+        // Dim screen glow rides ALONGSIDE the torch, not instead of it — the
+        // LED faces away from the user, this faces toward them, and it's a
+        // free second visual cue if a hardware hiccup drops one torch pulse.
+        el.screenFlash.classList.add('flash-on-dim');
+        setTimeout(function () { el.screenFlash.classList.remove('flash-on-dim'); }, 90);
+      } else {
+        beatLog('FLASH', 'origen=' + source, 't=' + performance.now().toFixed(0), '(sin linterna soportada — usando destello de pantalla)');
+        el.screenFlash.classList.add('flash-on');
+        setTimeout(function () { el.screenFlash.classList.remove('flash-on'); }, 90);
+      }
+    }
+
+    // --- FlashController: the only thing that knows HOW a beat becomes a
+    // physical cue (LED torch, screen flash, vibration). The beat-detection
+    // side (registerBeat / the predicted-pulse scheduler) only ever calls
+    // FlashController.pulse(source) — it doesn't know or care which
+    // hardware ends up representing the beat, which device this is, or
+    // whether a previous session already confirmed torch support. That
+    // separation is what lets the musical/tempo code stay 100% unaware of
+    // iPhone-vs-Android-vs-desktop differences.
+    var FLASH_MODE_CACHE_KEY = 'flashMode:v1';
+    var FlashController = {
+      cacheMode: function (mode) {
+        try { localStorage.setItem(FLASH_MODE_CACHE_KEY, mode); } catch (e) {}
+      },
+      seedFromCache: function () {
+        var cached = null;
+        try { cached = localStorage.getItem(FLASH_MODE_CACHE_KEY); } catch (e) {}
+        // Sets torchSupported directly — NOT through setTorchBadge — so the
+        // badge stays on "Comprobando…" (set by startSession just before
+        // this runs) instead of jumping to a confirmed-looking color for a
+        // guess that hasn't been reconfirmed yet.
+        if (cached === 'torch' || cached === 'screen') torchSupported = (cached === 'torch');
+      },
+      pulse: function (source) {
+        triggerFlashPulse(source);
+        // Supplementary cue, additive only — never a replacement for the
+        // visual flash. iOS Safari has no Vibration API at all, so this is
+        // a silent no-op there; nothing about iOS behavior changes.
+        if (navigator.vibrate) {
+          try { navigator.vibrate(35); } catch (e) {}
+        }
+      }
+    };
+
+    function stopSession() {
+      stopAnalysisClock();
+      releaseWakeLock();
+      if (torchOffTimer) { clearTimeout(torchOffTimer); torchOffTimer = null; }
+      if (predictedTimer) { clearTimeout(predictedTimer); predictedTimer = null; }
+      tempoLocked = false;
+      consecutivePredicted = 0;
+      if (videoTrack && torchSupported) {
+        videoTrack.applyConstraints({ advanced: [{ torch: false }] }).catch(function () {});
+      }
+      torchState = TorchState.OFF;
+      if (stream) {
+        stream.getTracks().forEach(function (t) { t.stop(); });
+      }
+      if (audioCtx) audioCtx.close();
+      stream = null;
+      videoTrack = null;
+      audioCtx = null;
+      analyserBroad = null;
+      analyserBand = null;
+      if (joinedViaLink) {
+        // A guest who scanned the QR or typed a code has no reason to land
+        // back on the "create a session" screen — that's the host's flow.
+        // Try to actually close the tab; browsers largely block script-
+        // initiated closes on pages they didn't open themselves, so this
+        // silently no-ops on most phones — the goodbye screen is the real,
+        // reliable exit for those cases.
+        try { window.close(); } catch (e) {}
+        showView('ended');
+      } else {
+        showView('landing');
+      }
+    }
+
+    el.btnStop.addEventListener('click', stopSession);
+
+    if (location.protocol === 'file:') {
+      var fileWarning = document.getElementById('file-protocol-warning');
+      if (fileWarning) fileWarning.hidden = false;
+    }
+
+    // --- Remote show controller (V3.1) -----------------------------------
+    // La lógica (WebSocket, reloj sincronizado, efectos, reconexión) vive en /js/remote.js y /js/effects.js.
+    var remoteMode = false;
+    function remoteConnect(code) {
+      remoteMode = true;
+      document.documentElement.classList.add('remote-on');            // oculta la interfaz de la app original (topbar, vistas): solo queda la superficie lumínica
+      window.DestelloRemote.onExit = function () {                    // «Salir» del panel: vuelve a la pantalla de despedida de la app
+        remoteMode = false; document.documentElement.classList.remove('remote-on'); showView('ended');
+      };
+      window.DestelloRemote.start(code);
+    }
+
+    // Length guard BEFORE touching URLSearchParams at all — a crafted link
+    // with a huge query string shouldn't get as far as being parsed just to
+    // find out its ?s= value is garbage.
+    var rawUrlCode = (location.search.length > 0 && location.search.length <= 100)
+      ? new URLSearchParams(location.search).get('s')
+      : null;
+    var urlMode = (location.search.length > 0 && location.search.length <= 100)
+      ? new URLSearchParams(location.search).get('mode')
+      : null;
+    var urlCode = rawUrlCode ? sanitizeSessionCode(rawUrlCode) : null;
+    if (urlCode && urlMode === 'remote') {
+      sessionCode = urlCode;
+      joinedViaLink = true;
+      showView('landing');
+      remoteConnect(sessionCode);
+    } else if (urlMode === 'remote') {
+      remoteConnect('');                                              // aplicación instalada sin código: se pide el código en la pantalla de incorporación
+    } else if (urlCode) {
+      sessionCode = urlCode;
+      joinedViaLink = true;
+      el.activateCodeLabel.textContent = 'Sesión ' + sessionCode;
+      showView('activate');
+    } else {
+      showView('landing');
+    }
+  })();
+  </script>
+
+</body>
+</html>

@@ -143,3 +143,21 @@ test('Redis caído: el sistema informa degradación, rechaza órdenes sin perder
   await sleep(5500);
   assert.equal((await http(A.base, 'GET', '/readyz')).status, 200, 'se recupera al volver Redis');
 });
+
+test('Redis: el interruptor de la app Flash habilitado en la instancia A lo ven la instancia B (≤ 5 s) y una instancia nueva al arrancar', { skip, timeout: 30000 }, async t => {
+  const rport = await freePort(); const redis = await startRedis(rport); t.after(() => redis.kill());
+  const url = `redis://127.0.0.1:${rport}`;
+  const A = await startServer({ redisUrl: url, instanceId: 'A', redisPrefix: 'tf:' }); t.after(A.stop);
+  const B = await startServer({ redisUrl: url, instanceId: 'B', redisPrefix: 'tf:' }); t.after(B.stop);
+  assert.equal((await fetch(B.base + '/flash')).status, 403, 'deshabilitada por defecto');
+  const op = await login(A.base);
+  assert.equal((await http(A.base, 'POST', '/api/admin/flash', { token: op, body: { enabled: true } })).json.enabled, true);
+  assert.equal((await fetch(A.base + '/flash')).status, 200, 'la instancia que lo cambió lo aplica al instante');
+  let seen = false;
+  for (let i = 0; i < 70 && !seen; i++) { seen = (await fetch(B.base + '/flash')).status === 200; if (!seen) await sleep(100); }
+  assert.ok(seen, 'la otra instancia lo ve en ≤ 7 s (sondeo de 5 s)');
+  const C = await startServer({ redisUrl: url, instanceId: 'C', redisPrefix: 'tf:' }); t.after(C.stop);
+  assert.equal((await fetch(C.base + '/flash')).status, 200, 'una instancia nueva lo lee al arrancar');
+  await http(B.base, 'POST', '/api/admin/flash', { token: await login(B.base), body: { enabled: false } });
+  assert.equal((await fetch(B.base + '/flash')).status, 403);
+});

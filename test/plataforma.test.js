@@ -72,7 +72,7 @@ test('normalizeCode y toHex', () => {
 // ------------------------------------------------------------------ activos estáticos, metadatos y CSP (servidor real)
 test('index.html: metadatos de cobertura total, iOS standalone y bloqueo de "force dark"', async t => {
   const srv = await startServer(); t.after(srv.stop);
-  const html = await (await fetch(srv.base + '/')).text();
+  const html = await (await fetch(srv.base + '/?mode=remote')).text();
   assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/);
   assert.match(html, /<meta name="theme-color" content="#000000"/);
   assert.match(html, /<meta name="color-scheme" content="dark"/);
@@ -92,7 +92,7 @@ test('index.html: metadatos de cobertura total, iOS standalone y bloqueo de "for
   assert.ok(html.includes('id="remote-light"') && html.includes('id="remote-ui"'), 'capa lumínica separada de la capa de interfaz');
   assert.ok(html.indexOf('id="remote-light"') < html.indexOf('id="remote-ui"'), 'la interfaz va por encima de la capa lumínica en el DOM');
   // el script del <head> que marca el modo remoto antes del primer pintado está autorizado por hash en la CSP (sin unsafe-inline)
-  const res = await fetch(srv.base + '/'); const csp = res.headers.get('content-security-policy');
+  const res = await fetch(srv.base + '/?mode=remote'); const csp = res.headers.get('content-security-policy');
   assert.match(csp, /manifest-src 'self'/); assert.ok(!/script-src[^;]*unsafe-inline/.test(csp));
 });
 

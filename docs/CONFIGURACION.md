@@ -17,7 +17,7 @@ Todo sale de variables de entorno (`src/config.js`). **Ningún secreto está en 
 | `MASTER_TOKEN_TTL_S` | 43200 | Vigencia del token de Master de una sesión. |
 | `ALLOWED_ORIGINS` | (vacío) | Orígenes extra permitidos para WebSocket/CORS (lista separada por comas). El mismo host y `PUBLIC_BASE_URL` siempre se permiten. |
 | `ALLOW_NO_ORIGIN` | `false` en producción, `true` en desarrollo | Permitir WebSocket sin cabecera `Origin` (herramientas no-navegador). |
-| `PUBLIC_BASE_URL` | derivado de la petición | URL pública usada en el QR y para CSP/Origin. Recomendado fijarla. |
+| `PUBLIC_BASE_URL` | derivado de la petición | URL pública usada en el QR y para CSP/Origin. Recomendado fijarla, p. ej. `https://appsincronizado.onrender.com`. **Se valida al arrancar**: solo origen (sin ruta), y con `https://` en producción; si no, el servidor no arranca. |
 | `TRUST_PROXY_HOPS` | 1 en Render (`RENDER` definido), 0 en otro caso | Saltos de proxy de confianza para leer la IP real de `X-Forwarded-For`. |
 | `METRICS_TOKEN` | (vacío) | Token Bearer para `/metrics` (el token de operador también sirve). |
 
@@ -100,3 +100,9 @@ Todo sale de variables de entorno (`src/config.js`). **Ningún secreto está en 
 | `HTTP_STATIC_RATE_PER_MIN` | 0 (sin límite) | Páginas y archivos estáticos por IP. |
 | `CLOCK_PING_INTERVAL_MS` | **30000** (antes 15000) | Un ping de reloj por cliente cada ~30 s (±15 %). |
 | `BROADCAST_CHUNK` | 500 | (de la ronda anterior) |
+
+## App Flash (V3.2)
+
+| Variable | Defecto | Descripción |
+|---|---|---|
+| `FLASH_DEFAULT_ENABLED` | `false` | Estado **inicial** del acceso a la app Flash (`/flash`, `/?s=CODIGO`). El operador lo cambia desde `/master`; ese valor se guarda en el almacenamiento y **manda** sobre este. Con almacenamiento en memoria, un reinicio vuelve a este valor. |

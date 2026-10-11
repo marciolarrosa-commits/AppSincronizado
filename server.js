@@ -5,6 +5,18 @@
 // Sirve para aprovechar varios núcleos de UNA instancia. Sin REDIS_URL se usa un solo proceso (el estado en memoria no se puede compartir).
 const cluster = require('cluster');
 
+// Validación temprana y ruidosa de la configuración: un error de arranque (p. ej. falta MASTER_PASSWORD) debe verse en UNA línea clara de los logs
+// de Render y terminar el proceso con código 1, no como una traza de pila ni como un bucle de reinicios de procesos de trabajo.
+if (cluster.isPrimary) {
+  try {
+    const cfg = require('./src/config').loadConfig(process.env);
+    if (cfg.production && !cfg.redisUrl) console.warn(JSON.stringify({ level: 'warn', msg: 'single_instance_memory_state', detail: 'Sin REDIS_URL el estado vive en memoria: usar UNA sola instancia y un solo proceso (no escalar horizontalmente).' }));
+  } catch (e) {
+    console.error(JSON.stringify({ level: 'fatal', msg: 'startup_config_invalid', error: e.message }));
+    process.exit(1);
+  }
+}
+
 const wanted = Math.max(1, Math.floor(Number(process.env.CLUSTER_WORKERS || 1)));
 const workers = wanted > 1 && !process.env.REDIS_URL ? 1 : wanted;
 if (wanted > 1 && workers === 1 && cluster.isPrimary) console.warn('CLUSTER_WORKERS ignorado: requiere REDIS_URL (el estado en memoria no se comparte entre procesos).');
@@ -36,7 +48,8 @@ if (workers > 1 && cluster.isPrimary) {
 } else {
   if (cluster.isWorker) process.env.INSTANCE_ID = `${process.env.INSTANCE_ID || require('os').hostname()}-w${cluster.worker.id}`;
   const { createApp } = require('./src/app');
-  const app = createApp();
+  let app;
+  try { app = createApp(); } catch (e) { console.error(JSON.stringify({ level: 'fatal', msg: 'startup_failed', error: e.message })); process.exit(1); }
 
   app.start().then(() => {
     if (app.config.masterPasswordGenerated && !cluster.isWorker) {

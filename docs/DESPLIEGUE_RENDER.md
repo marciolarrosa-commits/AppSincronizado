@@ -24,7 +24,8 @@ Cada proceso de la app usa **2 conexiones** a Redis (comandos + suscripción). C
 ## Variables de entorno en Render
 
 Ver `CONFIGURACION.md`. Mínimo: `NODE_ENV=production`, `MASTER_PASSWORD` (el Blueprint la genera), `REDIS_URL` (la enlaza el Blueprint al Key Value), `PUBLIC_BASE_URL`, `SHUTDOWN_GRACE_MS=25000`.
-La contraseña generada se lee en el panel de Render (Environment). Con más de un proceso/instancia, `MASTER_PASSWORD` (o `TOKEN_SECRET`) debe ser la misma en todos: es la misma variable del servicio.
+La contraseña generada se lee en el panel de Render (Environment). **No va en el código ni en Git** (`.env` está en `.gitignore`; `render.yaml` solo pide generarla).
+`PUBLIC_BASE_URL` debe ser exactamente el dominio público (`https://appsincronizado.onrender.com`, sin barra final ni ruta): se valida al arrancar y se usa en el QR y en el origen WebSocket permitido. `FLASH_DEFAULT_ENABLED` es opcional (ver `CONFIGURACION.md`). Con más de un proceso/instancia, `MASTER_PASSWORD` (o `TOKEN_SECRET`) debe ser la misma en todos: es la misma variable del servicio.
 
 ## Procedimiento de despliegue
 
@@ -84,3 +85,27 @@ Marcado: **[medido]** = hay una ejecución propia que lo respalda (en un equipo 
 ### Valores por entorno que NO deben cambiarse sin medir
 
 `MAX_CONNECTIONS`, `COMMAND_MIN_LEAD_MS`, los límites de efectos (`MAX_STROBE_HZ` ≤ 3, `MAX_STROBE_DURATION_MS`), y los límites por IP (ver `SEGURIDAD.md`: se justifican por capas).
+
+## Errores de arranque (cómo reconocerlos en los logs de Render)
+
+Antes de iniciar, `server.js` valida la configuración y, si es inválida, escribe **una línea JSON** y termina con código 1 (Render marca el despliegue como fallido y conserva el anterior):
+
+```
+{"level":"fatal","msg":"startup_config_invalid","error":"Falta MASTER_PASSWORD (obligatoria con NODE_ENV=production). En Render: servicio > Environment > …"}
+```
+
+| Mensaje (`error`) | Causa | Solución |
+|---|---|---|
+| `Falta MASTER_PASSWORD…` | `NODE_ENV=production` y la variable no existe en el servicio | Render → servicio → *Environment* → agregar `MASTER_PASSWORD` (≥ 12 caracteres, secreta) → *Manual Deploy*. |
+| `MASTER_PASSWORD debe tener al menos 12 caracteres…` | Contraseña corta | Usar una más larga. |
+| `PUBLIC_BASE_URL inválida…` / `…debe usar https://…` | Tiene ruta/barra/espacios o es `http://` | Dejar solo el origen `https://…`. |
+| `Variable X inválida` | Valor numérico mal escrito | Corregirlo (ver `CONFIGURACION.md`). |
+| Aviso `single_instance_memory_state` | Producción sin `REDIS_URL` | Es válido **solo** con una instancia y un proceso (`CLUSTER_WORKERS=1`); con más, falta estado compartido. |
+
+**Sobre el fallo del commit `a6b1031` ("Falta MASTER_PASSWORD") y el éxito de `b4e58a5`**: el código lanza ese error si y solo si `NODE_ENV=production` y `MASTER_PASSWORD` está vacía; no depende del commit. Lo más probable es que la variable no estuviera cargada en el servicio en el momento de ese despliegue (un servicio creado antes del Blueprint no recibe sus variables automáticamente). **No se pudo verificar el estado del panel de Render desde aquí**: revisar *Environment* y volver a desplegar.
+
+## Una sola instancia vs varias
+
+* `REDIS_URL` es **opcional solo** con una instancia y un proceso (estado en memoria; un reinicio pierde las sesiones, el panel las recrea con el mismo código).
+* Más de una instancia, `CLUSTER_WORKERS>1` o escalado automático **exigen** `REDIS_URL`: `server.js` ignora `CLUSTER_WORKERS>1` sin Redis y avisa. Render no escala solo el plan *free* (una instancia).
+* El `render.yaml` enlaza un Key Value al servicio; quitar ese bloque para usar memoria.

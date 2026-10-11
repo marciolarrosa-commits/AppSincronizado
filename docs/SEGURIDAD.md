@@ -61,3 +61,10 @@ bloqueaban incluso la **carga de la página** (2 200 de 2 800 peticiones de 700 
 Mitigaciones: iniciar sesión antes del evento (el token dura 12 h y sobrevive a recargas), tener 2 operadores en redes distintas y rotar `MASTER_PASSWORD` si hay sospecha.
 Una contraseña correcta no debe saltarse el límite (sería un oráculo de fuerza bruta).
 Para el evento, vigilar `ws_rejected_*` y `http_rate_limited`: cualquier valor distinto de cero durante la audiencia es un falso positivo a investigar.
+
+## Interruptor de la app Flash (V3.2)
+
+* Cambiar el estado exige token de **operador** (el token de Master de sesión no sirve); el cuerpo se valida (`enabled` booleano, 400 si no) y el tamaño se limita (413). Se registra `flash_toggled` (sin tokens) y se cuenta en `/metrics`.
+* Deshabilitada, `/flash` y `/?s=` responden `403` con `cache-control: no-store`; la comprobación ocurre **antes** de cualquier `304`, así que una copia en caché no la salta. La pantalla del participante V3 (`mode=remote`) no depende del interruptor.
+* Límite conocido: el interruptor protege las direcciones de entrada, no el archivo (`flash.html` también contiene el cliente de V3). La app Flash no usa el servidor ni maneja datos sensibles.
+* Se dejaron de publicar los `*.artifact.json` (metadatos del editor) que antes se servían como estáticos.

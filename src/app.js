@@ -34,7 +34,7 @@ function loadStatic() {
       const full = path.join(dir, ent.name);
       if (ent.isDirectory()) { walk(full); continue; }
       const ext = path.extname(ent.name).toLowerCase();
-      if (!TYPES[ext]) continue;
+      if (!TYPES[ext] || ent.name.endsWith('.artifact.json')) continue;      // *.artifact.json son metadatos del editor, no se publican
       const buf = fs.readFileSync(full);
       const rel = '/' + path.relative(PUBLIC_DIR, full).split(path.sep).join('/');
       const entry = {
@@ -93,13 +93,18 @@ function createApp(userConfig = {}, deps = {}) {
   const sweeper = setInterval(() => { for (const l of [httpLimiter, staticLimiter, loginLimiter, wsConnLimiter, badJoinLimiter]) if (l) l.sweep(); }, 60000);
   sweeper.unref();
 
+  let flashEnabled = Boolean(config.flashDefaultEnabled);     // acceso a la app Flash anterior (/flash); lo cambia el operador desde /master
   let lastStore = { ok: true, latencyMs: 0, kind: store.kind };
   let lastSlowSkips = 0; let slowRecently = false;
   const startedAt = Date.now();
   let shuttingDown = false;
 
   async function pollStore() {
-    try { lastStore = await store.health(); metrics.observe('storeMs', lastStore.latencyMs || 0); } catch (e) { lastStore = { ok: false, latencyMs: null, kind: store.kind, error: e.message }; }
+    try {
+      lastStore = await store.health(); metrics.observe('storeMs', lastStore.latencyMs || 0);
+      // el interruptor Flash se refresca con este sondeo (cada 5 s): así no hay una consulta al almacenamiento por cada petición de página
+      if (lastStore.ok) { const f = await store.getSetting('flashEnabled'); if (f !== null && f !== undefined) flashEnabled = f === '1'; }
+    } catch (e) { lastStore = { ok: false, latencyMs: null, kind: store.kind, error: e.message }; }
     metrics.setGauge('store_up', lastStore.ok ? 1 : 0);
     const skips = metrics.get('ws_backpressure_skips'); slowRecently = skips > lastSlowSkips; lastSlowSkips = skips;
   }
@@ -191,21 +196,45 @@ function createApp(userConfig = {}, deps = {}) {
     return p;
   }
 
-  function serveStatic(req, res, pathname) {
-    if (pathname === '/') pathname = '/index.html';
-    else if (pathname === '/master') pathname = '/master.html';
+  // Páginas (sin redirecciones: cada URL responde directamente, no dependen de la caché del navegador):
+  //   /                            presentación de Destello·Sync V3 (index.html)
+  //   /?s=CODIGO&mode=remote       pantalla del participante (QR de V3, formato conservado) -> flash.html, SIEMPRE disponible
+  //   /?mode=remote                app instalada (PWA) sin código -> flash.html, SIEMPRE disponible
+  //   /master                      panel del operador (master.html)
+  //   /flash  y  /?s=CODIGO        app Flash anterior (micrófono + linterna) -> flash.html, solo si el operador la habilitó
+  // flash.html es UN archivo que contiene la app Flash y el cliente remoto de V3 (el ya validado en iPhone): no se separó para no tocarlo.
+  function pickPage(pathname, params) {
+    const clean = pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
+    if (clean === '/') {
+      if (params.get('mode') === 'remote') return { file: '/flash.html' };
+      if (params.has('s')) return { file: '/flash.html', flash: true };       // enlaces/QR antiguos de la app Flash: /?s=CODIGO
+      return { file: '/index.html' };
+    }
+    if (clean === '/master') return { file: '/master.html' };
+    if (clean === '/flash' || clean === '/flash.html') return { file: '/flash.html', flash: true };
+    return { file: clean };
+  }
+
+  function serveStatic(req, res, pathname, params) {
     let decoded;
     try { decoded = decodeURIComponent(pathname); } catch { return sendJson(req, res, 400, { error: 'BAD_REQUEST' }); }
     if (decoded.includes('\0') || decoded.includes('..')) return sendJson(req, res, 400, { error: 'BAD_REQUEST' });
+    const page = pickPage(decoded, params);
+    let status = 200;
+    if (page.flash) {
+      if (!flashEnabled) { metrics.inc('flash_page_blocked'); page.file = '/flash-disabled.html'; status = 403; }
+      else metrics.inc('flash_page_served');
+    }
+    decoded = page.file;
     const entry = statics.get(decoded);
     if (!entry || (decoded !== '/' && decoded.startsWith('/.'))) return sendJson(req, res, 404, { error: 'NOT_FOUND' });
-    const headers = baseHeaders({ 'content-type': entry.type, etag: entry.etag, 'cache-control': 'no-cache', vary: 'Accept-Encoding' });
+    const headers = baseHeaders({ 'content-type': entry.type, etag: entry.etag, 'cache-control': status === 200 ? 'no-cache' : 'no-store', vary: 'Accept-Encoding' });
     if (entry.type.startsWith('text/html')) headers['content-security-policy'] = csp(entry, wsOrigins(req));
-    if (req.headers['if-none-match'] === entry.etag) { res.writeHead(304, headers); return res.end(); }
+    if (status === 200 && req.headers['if-none-match'] === entry.etag) { res.writeHead(304, headers); return res.end(); }
     const wantsGzip = entry.gz && /\bgzip\b/.test(req.headers['accept-encoding'] || '');
     if (wantsGzip) headers['content-encoding'] = 'gzip';
     headers['content-length'] = (wantsGzip ? entry.gz : entry.buf).length;
-    res.writeHead(200, headers);
+    res.writeHead(status, headers);
     res.end(req.method === 'HEAD' ? undefined : (wantsGzip ? entry.gz : entry.buf));
   }
 
@@ -275,12 +304,25 @@ function createApp(userConfig = {}, deps = {}) {
       }
     }
 
-    if (m === 'GET' && p === '/api/admin/status') {
+    // Interruptor de la app Flash (solo operador). La URL pública de la app Flash es /flash; el QR lo arma el panel con un código propio.
+    if (p === '/api/admin/flash' && (m === 'GET' || m === 'POST')) {
       requireOperator(req);
-      return sendJson(req, res, 200, { health: getHealth(), hub: { ...hub.stats(), internals: hub.debugCounts() }, metrics: metrics.snapshot(), store: { ...lastStore, config: storeConfig() }, instance: config.instanceId, cluster: { workerId: process.env.NODE_UNIQUE_ID || null }, sessions: await store.countSessions().catch(() => null) });
+      if (m === 'POST') {
+        const body = await readJson(req);
+        if (typeof body.enabled !== 'boolean') return sendJson(req, res, 400, { error: 'INVALID_BODY', message: 'Se esperaba { "enabled": true | false }' });
+        await store.setSetting('flashEnabled', body.enabled ? '1' : '0');       // se guarda ANTES de aplicarlo: si el almacenamiento falla, no queda a medias
+        flashEnabled = body.enabled;
+        metrics.inc('flash_toggled'); logger.info('flash_toggled', { enabled: flashEnabled });
+      }
+      return sendJson(req, res, 200, { enabled: flashEnabled, defaultEnabled: Boolean(config.flashDefaultEnabled), path: '/flash', url: `${baseUrl(req)}/flash` });
     }
 
-    if (m === 'GET' || m === 'HEAD') return serveStatic(req, res, p);
+    if (m === 'GET' && p === '/api/admin/status') {
+      requireOperator(req);
+      return sendJson(req, res, 200, { health: getHealth(), hub: { ...hub.stats(), internals: hub.debugCounts() }, metrics: metrics.snapshot(), store: { ...lastStore, config: storeConfig() }, flash: { enabled: flashEnabled }, instance: config.instanceId, cluster: { workerId: process.env.NODE_UNIQUE_ID || null }, sessions: await store.countSessions().catch(() => null) });
+    }
+
+    if (m === 'GET' || m === 'HEAD') return serveStatic(req, res, p, u.searchParams);
     return sendJson(req, res, 404, { error: 'NOT_FOUND' });
   }
 

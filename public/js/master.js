@@ -41,7 +41,7 @@
   }
   function logout(expired) {
     S.op = null; try { sessionStorage.removeItem('ds-op'); sessionStorage.removeItem('ds-sid'); } catch (e) { /* bloqueado */ }
-    teardown(); show('loginView', true); show('setupView', false); show('control', false); show('logout', false);
+    teardown(); show('loginView', true); show('setupView', false); show('control', false); show('logout', false); show('flashCard', false);
     pill('status', '● sin sesión'); $('loginError').textContent = expired ? 'La sesión de operador venció. Ingresá de nuevo.' : '';
   }
   function teardown() {
@@ -52,7 +52,7 @@
 
   // ---------------------------------------------------------------- vistas
   function enter() {
-    show('loginView', false); show('logout', true);
+    show('loginView', false); show('logout', true); flashLoad();
     var sid = null; try { sid = sessionStorage.getItem('ds-sid'); } catch (e) { /* bloqueado */ }
     if (sid) return resume(sid).catch(function () { showSetup(); });
     showSetup();
@@ -83,6 +83,41 @@
   }
   function create() { return api('POST', '/api/sessions', {}).then(adopt); }
   function resume(id) { return api('POST', '/api/sessions/' + id + '/master-token', {}).then(adopt); }
+
+  // ---------------------------------------------------------------- app Flash (acceso habilitable por el operador)
+  // El interruptor vive en el servidor (/api/admin/flash). El código del QR Flash es solo una etiqueta para los teléfonos (la app Flash no usa el servidor).
+  var FLASH_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  var F = { enabled: false, url: '', code: null, loaded: false };
+  function flashNewCode() {
+    var a = new Uint8Array(6); (window.crypto || window.msCrypto).getRandomValues(a);
+    var c = ''; for (var i = 0; i < 6; i++) c += FLASH_CHARS[a[i] % FLASH_CHARS.length];     // sesgo mínimo: irrelevante para una etiqueta pública
+    F.code = c; try { sessionStorage.setItem('ds-flash-code', c); } catch (e) { /* bloqueado */ }
+  }
+  function flashLink() { return F.url + '?s=' + F.code; }
+  function flashPaint() {
+    show('flashCard', true);
+    pill('flashState', F.enabled ? 'Flash: HABILITADA' : 'Flash: deshabilitada', F.enabled ? 'ok' : '');
+    $('flashToggle').textContent = F.enabled ? 'Deshabilitar app Flash' : 'Habilitar app Flash';
+    $('flashToggle').disabled = false;
+    show('flashOn', F.enabled);
+    if (!F.enabled) { $('flashQr').textContent = ''; return; }
+    if (!F.code) { try { F.code = sessionStorage.getItem('ds-flash-code'); } catch (e) { F.code = null; } if (!/^[A-HJ-NP-Z2-9]{6}$/.test(F.code || '')) flashNewCode(); }
+    var link = flashLink();
+    $('flashCode').textContent = F.code; $('flashUrl').textContent = link;
+    var qr = $('flashQr'); qr.textContent = '';
+    new QRCode(qr, { text: link, width: 230, height: 230, colorDark: '#111', colorLight: '#fff', correctLevel: QRCode.CorrectLevel.M });
+  }
+  function flashApply(j) { F.enabled = !!j.enabled; F.url = j.url; F.loaded = true; flashPaint(); }
+  function flashLoad() {
+    return api('GET', '/api/admin/flash').then(flashApply).catch(function (e) {
+      pill('flashState', 'Flash: sin datos', 'bad'); show('flashCard', true); alertBox('bad', 'No se pudo consultar el estado de la app Flash: ' + e.message, 'flash');
+    });
+  }
+  function flashToggle() {
+    $('flashToggle').disabled = true;
+    return api('POST', '/api/admin/flash', { enabled: !F.enabled }).then(function (j) { alertBox('', null, 'flash'); flashApply(j); })
+      .catch(function (e) { $('flashToggle').disabled = false; alertBox('bad', 'No se pudo cambiar la app Flash: ' + e.message, 'flash'); });
+  }
 
   // ---------------------------------------------------------------- WebSocket del Master
   function wsUrl() { return (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws'; }
@@ -247,6 +282,10 @@
   $('copy').addEventListener('click', function () { if (navigator.clipboard) navigator.clipboard.writeText($('url').textContent); });
   $('open').addEventListener('click', function () { window.open($('url').textContent, '_blank', 'noopener'); });
   $('logout').addEventListener('click', function () { logout(false); });
+  $('flashToggle').addEventListener('click', flashToggle);
+  $('flashNewCode').addEventListener('click', function () { flashNewCode(); flashPaint(); });
+  $('flashCopy').addEventListener('click', function () { if (navigator.clipboard) navigator.clipboard.writeText($('flashUrl').textContent); });
+  $('flashOpen').addEventListener('click', function () { window.open($('flashUrl').textContent, '_blank', 'noopener'); });
   $('loginForm').addEventListener('submit', function (e) {
     e.preventDefault(); $('loginError').textContent = '';
     api('POST', '/api/master/login', { password: $('password').value }).then(function (j) {

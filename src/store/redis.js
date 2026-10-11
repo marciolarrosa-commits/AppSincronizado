@@ -107,6 +107,10 @@ function createRedisStore(config, logger) {
       catch (e) { return { ok: false, latencyMs: null, kind: 'redis', error: e.message || lastError }; }
     },
 
+    // Ajustes del operador compartidos entre instancias (p. ej. acceso a la app Flash). Sin TTL.
+    async getSetting(key) { return cmd.get(p + 'set:' + key); },
+    async setSetting(key, value) { await cmd.set(p + 'set:' + key, String(value)); },
+
     async createSession(id) {
       const now = Date.now();
       const st = initialState(now);
