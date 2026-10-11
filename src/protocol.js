@@ -83,8 +83,9 @@ function validateHello(msg) {
 }
 
 function validatePing(msg) {
-  onlyKeys(msg, ['protocolVersion', 'type', 't0'], 'ping');
-  return { t0: numberIn(msg.t0, 0, 1e15, 't0') };
+  onlyKeys(msg, ['protocolVersion', 'type', 't0', 'rtt'], 'ping');
+  // `rtt` (opcional, V3.4): mejor RTT del reloj del teléfono; solo alimenta una métrica de calidad de sincronía
+  return { t0: numberIn(msg.t0, 0, 1e15, 't0'), rtt: msg.rtt === undefined ? null : numberIn(msg.rtt, 0, 60000, 'rtt') };
 }
 
 const APPLIED_FIELDS = ['protocolVersion', 'type', 'commandId', 'stateVersion', 'deviationMs', 'receiveLeadMs'];
@@ -183,7 +184,7 @@ const server = {
     if ('commandId' in out) { const id = safeCommandId(out.commandId); if (id) out.commandId = id; else delete out.commandId; }
     return out;
   },
-  pong: (t0) => ({ protocolVersion: PROTOCOL_VERSION, type: 'pong', t0, serverTimestamp: Date.now() }),
+  pong: (t0, serverTimestamp) => ({ protocolVersion: PROTOCOL_VERSION, type: 'pong', t0, serverTimestamp: serverTimestamp === undefined ? Date.now() : serverTimestamp }),
   state: (sessionId, state, extra) => ({
     protocolVersion: PROTOCOL_VERSION, type: 'state', sessionId,
     commandId: state.commandId, stateVersion: state.stateVersion, incarnation: state.incarnation, serverTimestamp: state.serverTimestamp,

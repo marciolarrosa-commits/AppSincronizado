@@ -217,3 +217,32 @@ test('Redis: la SECUENCIA de colores se acepta en A y llega íntegra (pasos, tie
   const late = await joinPublic(B.wsUrl, s.sessionId, dev(2));
   assert.deepEqual(late.welcome.state.payload.steps, steps);
 });
+
+test('Redis: relojes de instancia DESFASADOS (+900 / −700 ms): todas las marcas de tiempo (welcome, pong, executeAt) salen de la hora del almacenamiento y los teléfonos de ambas instancias concuerdan', { skip, timeout: 60000 }, async t => {
+  const rport = await freePort(); const redis = await startRedis(rport); t.after(() => redis.kill());
+  const url = `redis://127.0.0.1:${rport}`;
+  const A = await startServer({ redisUrl: url, instanceId: 'A', redisPrefix: 'tc:', clockSkewMs: 900 }); t.after(A.stop);
+  const B = await startServer({ redisUrl: url, instanceId: 'B', redisPrefix: 'tc:', clockSkewMs: -700 }); t.after(B.stop);
+  const C = await startServer({ redisUrl: url, instanceId: 'C', redisPrefix: 'tc:', clockSkewMs: 900, clockSource: 'local' }); t.after(C.stop);      // control: SIN corrección
+  const op = await login(A.base); const s = await createSession(A.base, op);
+  const master = await joinMaster(A.wsUrl, s.sessionId, s.masterToken);
+  const pa = await joinPublic(A.wsUrl, s.sessionId, dev(1)); const pb = await joinPublic(B.wsUrl, s.sessionId, dev(2)); const pc = await joinPublic(C.wsUrl, s.sessionId, dev(3));
+  // este proceso comparte equipo (y reloj) con Redis: Date.now() es la referencia real
+  const errOf = async p => { p.send({ protocolVersion: 1, type: 'ping', t0: 10 }); const pong = await p.waitFor('pong'); return pong.serverTimestamp - Date.now(); };
+  const ea = await errOf(pa), eb = await errOf(pb), ec = await errOf(pc);
+  assert.ok(Math.abs(ea) < 40, `instancia A (+900 ms) corregida: ${ea.toFixed(1)} ms`); assert.ok(Math.abs(eb) < 40, `instancia B (−700 ms) corregida: ${eb.toFixed(1)} ms`);
+  assert.ok(ec > 800, `control sin corrección (clockSource=local): el desfase se ve completo (${ec.toFixed(0)} ms)`);
+  for (const [p, nombre] of [[pa, 'A'], [pb, 'B']]) assert.ok(Math.abs(p.welcome.serverTimestamp - Date.now()) < 400 && p.welcome.serverTimestamp > 0, 'welcome de ' + nombre);
+  assert.ok(Math.abs(pa.welcome.serverTimestamp - pb.welcome.serverTimestamp) < 300, 'welcome de A y B concuerdan (diferían 1600 ms sin corrección)');
+  // executeAt: la orden se acepta en A y la ve el teléfono de B; ambos ven el MISMO instante, y es el real (≈ ahora + margen)
+  const t0 = Date.now();
+  master.send({ protocolVersion: 1, type: 'command', commandId: 'clk-cmd-0001', leadMs: 2000, payload: { effect: 'solid', color: '#FFFFFF', fadeMs: 0 } });
+  const stA = await pa.waitFor(m => m.type === 'state' && m.commandId === 'clk-cmd-0001', 4000); const stB = await pb.waitFor(m => m.type === 'state' && m.commandId === 'clk-cmd-0001', 4000);
+  assert.equal(stA.executeAt, stB.executeAt);
+  assert.ok(stA.executeAt - t0 > 1900 && stA.executeAt - t0 < 2400, `executeAt ≈ ahora + 2 s en tiempo REAL (no desfasado ${900} ms): ${stA.executeAt - t0} ms`);
+  // el desfase detectado queda visible para el operador
+  const stat = async (base) => (await fetch(base + '/api/admin/status', { headers: { authorization: 'Bearer ' + op } })).json();
+  const sa = (await stat(A.base)).clock, sb = (await stat(B.base)).clock, sc = (await stat(C.base)).clock;
+  assert.equal(sa.source, 'store'); assert.ok(Math.abs(sa.offsetMs + 900) < 40, 'A corrige ≈ −900 ms: ' + sa.offsetMs); assert.ok(Math.abs(sb.offsetMs - 700) < 40, 'B corrige ≈ +700 ms: ' + sb.offsetMs);
+  assert.equal(sc.source, 'local'); assert.equal(sc.offsetMs, 0);
+});

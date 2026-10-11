@@ -263,6 +263,7 @@
     pill('health', 'salud: ' + h.status, cls);
     $('hStatus').textContent = h.status + (h.reasons && h.reasons.length ? ' — ' + h.reasons.join('; ') : '');
     $('hLag').textContent = h.eventLoopLagP99Ms + ' ms (p99)';
+    var ck = h.clockRtt; $('hClock').textContent = ck && ck.n ? 'RTT p50 ' + Math.round(ck.p50) + ' ms · p95 ' + Math.round(ck.p95) + ' ms → error de sincronía ≤ ' + Math.round(ck.p50 / 2) + ' / ' + Math.round(ck.p95 / 2) + ' ms (n=' + ck.n + ')' : '—';
     $('hStore').textContent = h.storeLatencyMs == null ? 'sin respuesta' : Math.round(h.storeLatencyMs * 10) / 10 + ' ms';
     if (h.status !== 'ok') alertBox(h.status === 'degraded' ? 'warn' : 'bad', 'Sistema ' + h.status + ': las órdenes podrían llegar tarde. ' + (h.reasons || []).join('; '), 'health');
     else alertBox('', null, 'health');

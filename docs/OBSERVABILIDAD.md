@@ -50,3 +50,9 @@ Aplicación real en dispositivos: mensajes `stats` al Master (`onTimePct`, `devi
 * **Internos del hub** (`hub.internals`): salas, conexiones, entradas de heartbeat, reenvíos pendientes, buffers de acks, IP rastreadas y temporizadores de estadísticas. Deben volver a **0** cuando no hay conexiones (verificado con 1 500 ciclos): un valor que no baja indica una fuga.
 * **Métricas nuevas**: `reconciled_states` (estados reenviados por la reconciliación: distinto de 0 = se perdió una publicación o cayó el suscriptor), `session_incarnation_changes` (sesiones re-creadas con el hub vivo), `ws_rejected_prehello`, `ws_rejected_ipcap`, `login_rate_limited`.
 * Alertas adicionales: `increase(destello_reconciled_states_total[5m]) > 0` → revisar Redis/red entre instancias; `destello_ws_rejected_badjoin_total` o `destello_http_rate_limited_total` > 0 durante la audiencia → posible falso positivo de NAT (ver SEGURIDAD.md).
+
+## Calidad de la sincronía (V3.4.0)
+
+* Histograma `destello_clockRttMs` (y `metrics.latency.clockRttMs` en `/api/admin/status`): mejor RTT que informa cada teléfono en sus `ping`; el error de su reloj es **≤ RTT/2**. El panel `/master` lo muestra en «Reloj de los teléfonos» (p50/p95 → cota de error).
+* Gauges `clock_offset_ms` (corrección aplicada al reloj local de la instancia para igualar al almacenamiento) y `clock_store_rtt_ms`; `/api/admin/status` → `clock: { source, offsetMs, storeRttMs, synced, ageMs }`. Una instancia con `|offsetMs|` grande tiene el reloj del sistema desfasado (la corrección lo compensa, pero conviene revisar el NTP del host).
+* Alerta sugerida: RTT p95 > 300 ms sostenido (red del recinto congestionada ⇒ más margen de sincronización).

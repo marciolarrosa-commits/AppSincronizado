@@ -32,7 +32,7 @@
     var dim = p.intensity == null ? 1 : p.intensity;
     var calm = ctx.reduced || ctx.stale;
     var ended = p.durationMs > 0 && t >= p.durationMs;
-    var rgb; var animated = false; var flashing = false;
+    var rgb; var animated = false; var flashing = false; var next;
     switch (p.effect) {
       case 'solid': {
         var target = hex(p.color); var fade = p.fadeMs || 0;
@@ -72,6 +72,7 @@
           rgb = mix(prevC, cur, ease(off / fdm));
         } else rgb = cur;
         animated = !endedSeq; flashing = flashLike && !endedSeq;
+        if (!endedSeq) next = (fdm > 0 && off < fdm) ? 0 : steps[idx].holdMs - off;      // ms hasta el próximo cambio posible (0 = en transición: dibujar siempre)
         break;
       }
       case 'strobe': {
@@ -84,7 +85,9 @@
       }
       default: rgb = [0, 0, 0];     // 'off' o desconocido -> estado seguro (pantalla apagada)
     }
-    return { rgb: [rgb[0] * dim, rgb[1] * dim, rgb[2] * dim], animated: animated, flashing: flashing };
+    var out = { rgb: [rgb[0] * dim, rgb[1] * dim, rgb[2] * dim], animated: animated, flashing: flashing };
+    if (next !== undefined) out.next = next;
+    return out;
   }
 
   var COLOR_RE = /^#[0-9a-fA-F]{6}$/;

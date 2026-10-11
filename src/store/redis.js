@@ -108,6 +108,8 @@ function createRedisStore(config, logger) {
     },
 
     // Ajustes del operador compartidos entre instancias (p. ej. acceso a la app Flash). Sin TTL.
+    // Hora del servidor Redis/Valkey (TIME): referencia ÚNICA para todas las instancias de la app (ver docs/SINCRONIZACION.md).
+    async time() { const t = await cmd.time(); return Number(t[0]) * 1000 + Number(t[1]) / 1000; },
     async getSetting(key) { return cmd.get(p + 'set:' + key); },
     async setSetting(key, value) { await cmd.set(p + 'set:' + key, String(value)); },
 

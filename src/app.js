@@ -103,6 +103,7 @@ function createApp(userConfig = {}, deps = {}) {
   async function pollStore() {
     try {
       lastStore = await store.health(); metrics.observe('storeMs', lastStore.latencyMs || 0);
+      if (lastStore.ok) await syncClock().catch(() => {});
       // el interruptor Flash se refresca con este sondeo (cada 5 s): así no hay una consulta al almacenamiento por cada petición de página
       if (lastStore.ok) { const f = await store.getSetting('flashEnabled'); if (f !== null && f !== undefined) flashEnabled = f === '1'; }
     } catch (e) { lastStore = { ok: false, latencyMs: null, kind: store.kind, error: e.message }; }
@@ -124,14 +125,32 @@ function createApp(userConfig = {}, deps = {}) {
     const conns = hub ? hub.connectionCount : 0;
     if (conns >= config.maxConnections) { status = 'overloaded'; reasons.push('capacidad máxima de conexiones'); }
     else if (conns >= config.maxConnections * 0.9) { if (status === 'ok') status = 'degraded'; reasons.push('cerca de la capacidad máxima'); }
-    return { status, reasons, eventLoopLagP99Ms: g.event_loop_lag_p99_ms || 0, storeLatencyMs: lastStore.latencyMs, connections: conns, maxConnections: config.maxConnections };
+    const ch = metrics.hists.clockRttMs;
+    return { status, reasons, clockRtt: { n: ch.n, p50: ch.n ? ch.quantile(0.5) : null, p95: ch.n ? ch.quantile(0.95) : null }, eventLoopLagP99Ms: g.event_loop_lag_p99_ms || 0, storeLatencyMs: lastStore.latencyMs, connections: conns, maxConnections: config.maxConnections };
   }
 
   // Configuración EFECTIVA del almacenamiento, verificable sin exponer secretos (la contraseña de REDIS_URL se enmascara).
   function maskUrl(u) { try { const x = new URL(u); return `${x.protocol}//${x.username || x.password ? '***@' : ''}${x.host}${x.pathname && x.pathname !== '/' ? x.pathname : ''}`; } catch { return '(URL inválida)'; } }
   function storeConfig() { return store.kind === 'redis' ? { kind: 'redis', url: maskUrl(config.redisUrl), prefix: config.redisPrefix, commandHistory: config.maxCommandHistory } : { kind: 'memory', commandHistory: config.maxCommandHistory }; }
 
-  const hub = createHub({ config, store, metrics, logger, auth, getHealth });
+  // ------------------------------------------------------------------ reloj único del servidor
+  // Todas las marcas de tiempo que ven los teléfonos (welcome, pong, executeAt, ack) salen de ESTE reloj. Con varias instancias, si cada una usara su reloj del
+  // sistema, los teléfonos de instancias distintas quedarían desfasados por la diferencia entre relojes (decenas o cientos de ms): se usa la hora del almacenamiento
+  // compartido (Redis TIME), que es la misma para todas. Un solo proceso en memoria: reloj local (no hay con qué comparar).
+  const clock = {
+    source: config.clockSource, skewMs: config.clockSkewMs || 0, offsetMs: 0, rttMs: null, synced: false, updatedAt: 0, samples: [],
+    now() { return Date.now() + this.skewMs + this.offsetMs; }
+  };
+  async function syncClock() {
+    if (store.kind !== 'redis' || config.clockSource !== 'store') return;
+    const t0 = Date.now() + clock.skewMs; const st = await store.time(); const t1 = Date.now() + clock.skewMs;
+    clock.samples.push({ rtt: t1 - t0, off: st - (t0 + t1) / 2 }); if (clock.samples.length > 8) clock.samples.shift();
+    const best = clock.samples.reduce((a, b) => (b.rtt < a.rtt ? b : a));          // menor RTT al almacenamiento = menor incertidumbre
+    clock.offsetMs = best.off; clock.rttMs = best.rtt; clock.synced = true; clock.updatedAt = Date.now();
+    metrics.setGauge('clock_offset_ms', Math.round(clock.offsetMs)); metrics.setGauge('clock_store_rtt_ms', Math.round(best.rtt * 10) / 10);
+  }
+
+  const hub = createHub({ config, store, metrics, logger, auth, getHealth, clock });
 
   // ------------------------------------------------------------------ utilidades HTTP
   function clientIp(req) {
@@ -320,7 +339,7 @@ function createApp(userConfig = {}, deps = {}) {
 
     if (m === 'GET' && p === '/api/admin/status') {
       requireOperator(req);
-      return sendJson(req, res, 200, { version: VERSION, health: getHealth(), hub: { ...hub.stats(), internals: hub.debugCounts() }, metrics: metrics.snapshot(), store: { ...lastStore, config: storeConfig() }, flash: { enabled: flashEnabled }, instance: config.instanceId, cluster: { workerId: process.env.NODE_UNIQUE_ID || null }, sessions: await store.countSessions().catch(() => null) });
+      return sendJson(req, res, 200, { version: VERSION, health: getHealth(), hub: { ...hub.stats(), internals: hub.debugCounts() }, metrics: metrics.snapshot(), store: { ...lastStore, config: storeConfig() }, flash: { enabled: flashEnabled }, clock: { source: clock.source, offsetMs: Math.round(clock.offsetMs * 10) / 10, storeRttMs: clock.rttMs == null ? null : Math.round(clock.rttMs * 10) / 10, synced: clock.synced, ageMs: clock.updatedAt ? Date.now() - clock.updatedAt : null }, instance: config.instanceId, cluster: { workerId: process.env.NODE_UNIQUE_ID || null }, sessions: await store.countSessions().catch(() => null) });
     }
 
     if (m === 'GET' || m === 'HEAD') return serveStatic(req, res, p, u.searchParams);
@@ -404,6 +423,7 @@ function createApp(userConfig = {}, deps = {}) {
   // ------------------------------------------------------------------ ciclo de vida
   async function start() {
     await store.init();
+    if (store.kind === 'redis') for (let i = 0; i < 4; i++) await syncClock().catch(() => {});      // varias muestras antes de aceptar tráfico: la mejor (menor RTT) fija el reloj
     await pollStore();
     hub.start();
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(config.port, config.host, config.listenBacklog, resolve); });
@@ -427,7 +447,7 @@ function createApp(userConfig = {}, deps = {}) {
     logger.info('shutdown_done', { remaining: hub.connectionCount });
   }
 
-  return { config, server, wss, hub, store, metrics, auth, sessions, logger, start, shutdown, getHealth, address: () => server.address() };
+  return { config, server, wss, hub, store, metrics, auth, sessions, logger, clock, start, shutdown, getHealth, address: () => server.address() };
 }
 
 module.exports = { createApp };

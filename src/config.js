@@ -60,6 +60,10 @@ function loadConfig(env = process.env, overrides = {}) {
     // App «Flash» (micrófono + linterna, versión anterior). Convive con Destello·Sync V3: el operador la habilita desde /master y el valor se guarda
     // en el almacenamiento. Esto es solo el estado INICIAL mientras el operador no lo haya cambiado.
     flashDefaultEnabled: bool(env, 'FLASH_DEFAULT_ENABLED', false),
+    // Reloj de las marcas de tiempo (executeAt, pong, welcome): con varias instancias deben ser el MISMO. 'store' (predeterminado) = hora del almacenamiento compartido
+    // (Redis TIME); 'local' = reloj del sistema de cada instancia (puede diferir decenas o cientos de ms entre instancias).
+    clockSource: env.CLOCK_SOURCE === 'local' ? 'local' : 'store',
+    clockSkewMs: 0,                         // solo pruebas: desfasa el reloj local de ESTA instancia para comprobar que la corrección funciona
     // App «Flash» (micrófono + linterna, V1/V2). Convive con Destello·Sync V3: el operador la habilita desde /master (se guarda en el almacenamiento).
     // Este valor es solo el estado INICIAL cuando el operador nunca lo cambió.
     flashDefaultEnabled: bool(env, 'FLASH_DEFAULT_ENABLED', false),

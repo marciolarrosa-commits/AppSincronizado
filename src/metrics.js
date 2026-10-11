@@ -30,7 +30,8 @@ function createMetrics() {
     httpMs: new Histogram(MS_EDGES),
     broadcastMs: new Histogram(MS_EDGES),
     publishMs: new Histogram(MS_EDGES),
-    storeMs: new Histogram(MS_EDGES)
+    storeMs: new Histogram(MS_EDGES),
+    clockRttMs: new Histogram(MS_EDGES)          // mejor RTT que informa cada teléfono en sus ping: cota del error de su reloj (≤ RTT/2)
   };
   const loop = monitorEventLoopDelay({ resolution: 10 });
   loop.enable();

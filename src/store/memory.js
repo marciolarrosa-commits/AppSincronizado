@@ -32,6 +32,7 @@ function createMemoryStore(config) {
     },
     async close() { if (sweeper) clearInterval(sweeper); },
     async health() { return { ok: true, latencyMs: 0, kind: 'memory' }; },
+    async time() { return Date.now(); },                       // hora del almacenamiento (una sola instancia: la propia)
     async getSetting(key) { return settings.has(key) ? settings.get(key) : null; },
     async setSetting(key, value) { settings.set(key, String(value)); },
 

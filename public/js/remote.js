@@ -23,6 +23,7 @@
   var BANNER_AFTER_MS = 1500;          // en la pantalla de incorporación: sin conexión más de esto -> aviso visible
   var PANEL_TIMEOUT_MS = 10000, TAPS_TO_PANEL = 5, TAP_WINDOW_MS = 2500, FS_RETRY_MS = 3000;
   var PLAT = window.DestelloPlatform;
+  var CLK = window.DestelloClock;         // estimación del reloj del servidor (módulo puro: public/js/clock.js)
   var DEBUG = /[?&]debug=1/.test(location.search);
 
   var el = {};
@@ -122,7 +123,7 @@
     el.diag.textContent = ['Sesión ' + (S.code || '—') + ' · versión ' + S.lastVersion + ' · ' + (S.connected ? 'conectado' : 'sin conexión'),
       'Pantalla ' + S.viewport.w + '×' + S.viewport.h + ' CSS px · ×' + S.viewport.dpr + ' · ' + (S.env ? S.env.displayMode : '?'),
       'Pantalla completa: ' + fsText, 'Pantalla encendida (Wake Lock): ' + wakeText(),
-      colorLine(), 'Reloj: desfase ' + Math.round(S.clock.offset) + ' ms · RTT ' + (S.lastRtt == null ? '—' : Math.round(S.lastRtt)) + ' ms'].join('\n');
+      colorLine(), 'Reloj: desfase ' + Math.round(S.clock.offset) + ' ms · RTT ' + (S.lastRtt == null ? '—' : Math.round(S.lastRtt)) + ' ms · fuente ' + (S.clock.source || '—') + ' · error ≤ ' + (isFinite(S.clock.bestRtt) ? Math.round(S.clock.bestRtt / 2) + ' ms' : '—')].join('\n');
   }
   function measureViewport() {
     S.viewport = { w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio || 1 };
@@ -187,15 +188,11 @@
   // ---------------------------------------------------------------- reloj (estilo NTP, quedándose con la muestra de menor RTT)
   function onPong(msg) {
     var t1 = perfNow();
-    var rtt = t1 - msg.t0;
-    if (!(rtt >= 0) || rtt > 5000) return;
-    S.lastRtt = rtt; S.lastPongAt = Date.now();
-    var offset = msg.serverTimestamp + rtt / 2 - t1;          // servidor - perf local
-    S.clock.samples.push({ rtt: rtt, offset: offset, at: t1 });
-    if (S.clock.samples.length > 12) S.clock.samples.shift();
-    var best = S.clock.samples.reduce(function (a, b) { return b.rtt < a.rtt ? b : a; });
-    // Las muestras viejas pierden validez (deriva del reloj): se renuevan con la mejor reciente.
-    S.clock.offset = best.offset; S.clock.bestRtt = best.rtt; S.clock.synced = true;
+    var r = CLK.addPong(S.clock.samples, msg, t1);
+    if (!r) return;
+    S.lastRtt = r.rtt; S.lastPongAt = Date.now();
+    // Se queda con la muestra de menor RTT (servidor − perf local); las viejas se renuevan al salir de la ventana de 12.
+    S.clock.offset = r.best.offset; S.clock.bestRtt = r.best.rtt; S.clock.synced = true; S.clock.source = 'pong';
   }
   // Un ping por intervalo (con jitter ±15 % para que los teléfonos no se sincronicen entre sí): a 60 000 clientes y 30 s son ~2 000 ping/s en total.
   function schedulePing() {
@@ -203,7 +200,8 @@
     var base = S.config.clockPingIntervalMs || 30000;
     S.pingTimer = setTimeout(function () { sendPing(); schedulePing(); }, base * (0.85 + Math.random() * 0.3));
   }
-  function sendPing() { rawSend({ protocolVersion: PROTOCOL, type: 'ping', t0: perfNow() }); }
+  // `rtt` (opcional) = mejor RTT conocido: cota del error del reloj (≤ RTT/2). El servidor lo agrega en un histograma para saber qué tan buena es la sincronía del público.
+  function sendPing() { rawSend({ protocolVersion: PROTOCOL, type: 'ping', t0: perfNow(), rtt: isFinite(S.clock.bestRtt) ? Math.round(S.clock.bestRtt) : undefined }); }
   function clockBurst() { for (var i = 0; i < 6; i++) setTimeout(sendPing, i * 120); }
 
   // ---------------------------------------------------------------- aplicación de estados
@@ -262,12 +260,12 @@
     if (S.pending && now >= S.pending.executeAt) applyState(S.pending, now);
     var stale = !S.connected && S.disconnectedAt && (Date.now() - S.disconnectedAt > STALE_AFTER_MS);
     var calm = S.effectsOff || S.reduced;
-    var animated = false; var flashing = false;
+    var animated = false; var flashing = false; var nextHint = null;
     if (S.current && el.stage) {
       var r;
       try { r = FX.evaluate(S.current, now, { from: S.from, reduced: calm, stale: stale, manualOff: S.effectsOff, systemReduced: S.reduced }); }
       catch (e) { r = { rgb: [0, 0, 0], animated: false, flashing: false }; S.stats.evalErrors = (S.stats.evalErrors || 0) + 1; }   // ante cualquier fallo: estado seguro (apagado), nunca un bucle roto
-      S.shown = r.rgb; animated = r.animated; flashing = r.flashing; S.animating = animated;
+      S.shown = r.rgb; animated = r.animated; flashing = r.flashing; S.animating = animated; if (typeof r.next === 'number') nextHint = r.next;
       paintLight(r.rgb, animated);
     }
     if (DEBUG && el.debug && !el.debug.hidden) {
@@ -275,6 +273,13 @@
         ' dev=' + (S.appliedMeta ? Math.round(S.appliedMeta.deviation) : '-') + ' ign=' + S.stats.ignored + ' wake=' + S.wake.state + ' raf=' + (animated || S.pending ? 'on' : 'off');
     }
     if (S.pending || flashing) ensureLoop();                         // órdenes pendientes y strobe: a 60 fps para respetar su temporización
+    else if (animated && nextHint !== null) {
+      // Secuencia: el color solo cambia en las fronteras de cada paso. Entre fronteras no se dibuja (ahorra CPU/batería) y se despierta ~40 ms ANTES de la
+      // frontera para evaluar en cada cuadro (60 fps) y pintar en el primer cuadro posterior: el retraso de dibujo queda ≤ 1 cuadro (antes hasta ~35 ms por el
+      // sondeo a ~30 fps).
+      clearTimeout(S.wakeT);
+      if (nextHint > 80) S.wakeT = setTimeout(ensureLoop, nextHint - 40); else ensureLoop();
+    }
     else if (animated) setTimeout(ensureLoop, 22);                   // pulso/transición: ~30 fps (menos CPU y batería)
     // pestaña oculta: ensureLoop no hace nada; se retoma en visibilitychange
   }
@@ -334,7 +339,7 @@
     setConn(S.everConnected ? '● RECONECTANDO' : '● CONECTANDO', false);
     var opened = false;
     ws.onopen = function () {
-      opened = true;
+      opened = true; S.helloAt = perfNow();                       // para estimar el reloj con el viaje hello→welcome
       ws.send(JSON.stringify({ protocolVersion: PROTOCOL, type: 'hello', role: 'public', sessionId: S.code, deviceId: DEVICE,
         resumeVersion: Math.max(0, S.lastVersion), reconnect: S.everConnected }));
     };
@@ -346,7 +351,11 @@
           S.connected = true; S.everConnected = true; S.attempts = 0; S.disconnectedAt = 0; S.fatal = null; S.discArmed = false; clearDisconnectTimers();
           S.config = Object.assign(S.config, m.config || {});
           // Estimación inicial grosera con el reloj del servidor; se afina enseguida con ping/pong de menor RTT.
-          S.clock.samples = []; S.clock.offset = m.serverTimestamp - perfNow();
+          // Antes: offset = serverTimestamp − ahora, que IGNORA la demora de bajada del welcome (decenas/cientos de ms de error hasta el primer pong): un teléfono que
+          // se une a mitad de la secuencia mostraba una fase atrasada y luego saltaba. Ahora se compensa con el viaje hello→welcome (RTT/2) y, al reconectar,
+          // se conserva la estimación previa (de menor RTT) si es coherente.
+          var est = CLK.fromWelcome({ serverTimestamp: m.serverTimestamp, recvAt: perfNow(), helloAt: S.helloAt, prevOffset: S.clock.offset, prevSynced: S.clock.synced });
+          S.clock.samples = []; S.clock.offset = est.offset; S.clock.source = est.source;
           setConn('● CONECTADO', true); setBanner(null);
           S.lastVersion = -1;                                         // la bienvenida es autoritativa (también tras un reinicio del servidor)
           onState(m.state, { initial: true });

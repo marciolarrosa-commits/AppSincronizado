@@ -106,3 +106,9 @@ Todo sale de variables de entorno (`src/config.js`). **Ningún secreto está en 
 | Variable | Defecto | Descripción |
 |---|---|---|
 | `FLASH_DEFAULT_ENABLED` | `false` | Estado **inicial** del acceso a la app Flash (`/flash`, `/?s=CODIGO`). El operador lo cambia desde `/master`; ese valor se guarda en el almacenamiento y **manda** sobre este. Con almacenamiento en memoria, un reinicio vuelve a este valor. |
+
+## Reloj de las marcas de tiempo (V3.4.0)
+
+| Variable | Defecto | Descripción |
+|---|---|---|
+| `CLOCK_SOURCE` | `store` | `store`: todas las marcas de tiempo (welcome, pong, executeAt) usan la **hora del almacenamiento compartido** (Redis `TIME`), igual para todas las instancias. `local`: reloj del sistema de cada instancia (solo recomendable con una instancia). Con almacenamiento en memoria siempre es el reloj local. Ver `SINCRONIZACION.md`. |

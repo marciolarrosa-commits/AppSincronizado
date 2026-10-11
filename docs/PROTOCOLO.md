@@ -101,7 +101,12 @@ Cliente: ráfaga de 6 `ping` al conectar y 3 cada `clockPingIntervalMs`. Para ca
 (con `t0`, `t1` de `performance.now()`). Se conservan las últimas 12 muestras y se usa la de **menor RTT**. Hora del servidor = `performance.now() + offset`.
 No se usa el reloj del teléfono como autoridad.
 
-Con varias instancias, cada instancia tiene su propio reloj: confiamos en que los hosts estén sincronizados por NTP (error esperable de pocos ms; **no medido** en Render).
+**V3.4.0** — mejoras (detalle y mediciones en `SINCRONIZACION.md`):
+
+* **Estimación al unirse**: el cliente guarda el instante de envío del `hello` y, al recibir `welcome`, usa `offset = serverTimestamp + RTT(hello→welcome)/2 − recepción` (antes `serverTimestamp − recepción`, que ignoraba la demora de bajada: 60–180 ms de error hasta el primer pong). Al reconectar conserva la estimación previa si difiere < 1 s de la nueva.
+* **`ping.rtt`** (opcional, 0–60 000): el mejor RTT conocido del teléfono; cota del error de su reloj (≤ RTT/2). El servidor lo agrega en el histograma `clockRttMs` y lo publica en la salud (`presence.health.clockRtt`: `n`, `p50`, `p95`). Los clientes anteriores no lo envían.
+* **Reloj único del servidor**: `welcome.serverTimestamp`, `pong.serverTimestamp`, `state.serverTimestamp`/`executeAt` y `ack` salen del mismo reloj. Con Redis/Valkey es la **hora del almacenamiento** (`TIME`, mejor de 8 muestras por menor RTT, refrescada cada 5 s); así los teléfonos de instancias distintas no se desfasan por la diferencia entre sus relojes de sistema. `CLOCK_SOURCE=local` desactiva la corrección. Una sola instancia en memoria usa su reloj local.
+* **Dibujo**: la secuencia informa el tiempo hasta su próximo cambio; el cliente duerme entre cambios y evalúa a 60 fps solo cerca de cada frontera.
 
 ## Adaptador V3.0 (solo participantes)
 

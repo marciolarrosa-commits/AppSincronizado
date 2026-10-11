@@ -22,7 +22,8 @@ const CLOSE = {
 const rid = n => crypto.randomBytes(n).toString('hex');
 const nowMs = () => Date.now();
 
-function createHub({ config, store, metrics, logger, auth, getHealth }) {
+function createHub({ config, store, metrics, logger, auth, getHealth, clock }) {
+  const nowMs = () => (clock ? clock.now() : Date.now());          // hora de servidor (única entre instancias cuando hay almacenamiento compartido)
   const rooms = new Map();
   const buckets = Array.from({ length: Math.max(1, Math.round(config.heartbeatMs / 1000)) }, () => new Set());
   const needResync = new Set();
@@ -297,7 +298,7 @@ function createHub({ config, store, metrics, logger, auth, getHealth }) {
     try {
       switch (msg.type) {
         case 'hello': throw new P.ProtocolError('ALREADY_JOINED', 'Ya estás conectado');
-        case 'ping': { const { t0 } = P.validatePing(msg); return send(conn, P.server.pong(t0)); }
+        case 'ping': { const { t0, rtt } = P.validatePing(msg); if (rtt != null) metrics.observe('clockRttMs', rtt); return send(conn, P.server.pong(t0, nowMs())); }
         case 'applied':
           if (conn.role !== 'public') throw new P.ProtocolError('FORBIDDEN', 'Solo los participantes confirman aplicación');
           return handleApplied(conn, P.validateApplied(msg));
@@ -357,7 +358,7 @@ function createHub({ config, store, metrics, logger, auth, getHealth }) {
     store.touchSession(sess.id).catch(() => {});
 
     send(conn, P.server.welcome({
-      sessionId: sess.id, role: conn.role, deviceId: conn.deviceId,
+      serverTimestamp: nowMs(), sessionId: sess.id, role: conn.role, deviceId: conn.deviceId,
       state: room.latest,
       config: {
         heartbeatMs: config.heartbeatMs, clockPingIntervalMs: config.clockPingIntervalMs, onTimeToleranceMs: config.onTimeToleranceMs,
