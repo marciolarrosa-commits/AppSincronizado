@@ -1,0 +1,378 @@
+{
+  "label": "10000-i4",
+  "startedAt": "2026-10-09T19:57:47.776Z",
+  "node": "v24.18.0",
+  "platform": "win32 10.0.22631",
+  "cpus": 12,
+  "params": {
+    "CLIENTS": 10000,
+    "RATE": 400,
+    "COMMANDS": 5,
+    "INTERVAL": 1500,
+    "LEAD": 1500,
+    "STORM": 0,
+    "INSTANCES": 4,
+    "WORKERS": 1,
+    "redisRequestedByFlags": true,
+    "extraEnv": []
+  },
+  "sessionId": "NLA6KQ",
+  "rampMs": 64048,
+  "connections": {
+    "attempted": 10000,
+    "established": 9995,
+    "failed": 0,
+    "rejectedByReason": {},
+    "connectMs": {
+      "n": 9995,
+      "p50": 70,
+      "p95": 715,
+      "p99": 6082,
+      "max": 8338
+    }
+  },
+  "commands": {
+    "sent": 5,
+    "acceptedByServer": 5,
+    "rejectedByServer": 0,
+    "acceptMs": {
+      "n": 5,
+      "p50": 6,
+      "p95": 9,
+      "p99": 9,
+      "max": 9
+    },
+    "deliveredPerCommand": [
+      9995,
+      9995,
+      9995,
+      9995,
+      9995
+    ],
+    "expectedPerCommand": 9995,
+    "totalDelivered": 49975,
+    "totalExpected": 49975,
+    "lost": 0,
+    "duplicatesDroppedByClients": 0,
+    "outOfOrderDropped": 0,
+    "lossPct": 0,
+    "distributionLatencyMs": {
+      "n": 49975,
+      "p50": 167,
+      "p95": 311,
+      "p99": 409,
+      "max": 458
+    },
+    "simulatedApplyDeviationMs": {
+      "n": 49975,
+      "p50": 32,
+      "p95": 67,
+      "p99": 72,
+      "max": 75,
+      "note": "jitter del temporizador del generador; NO es una pantalla real"
+    },
+    "appliedReportsSentBySimulatedClients": 2505,
+    "masterStatsAggregatedByServer": {
+      "responded": 487,
+      "onTimePct": 100,
+      "p50": 50,
+      "p95": 75,
+      "p99": 75,
+      "note": "reportes de clientes simulados"
+    },
+    "windowSeconds": 11.9,
+    "serverMessagesOutDeltaAggregated": 49998,
+    "serverMessagesPerSecond": 4205,
+    "serverBytesOutDeltaAggregated": 14896991
+  },
+  "server": {
+    "note": "Contadores = suma de los acumulados de CADA proceso (una vez por proceso). Histogramas = suma de buckets. Picos = máximo entre procesos.",
+    "processesObserved": 4,
+    "processesExpected": 4,
+    "observedAllProcesses": true,
+    "effectiveStore": "redis",
+    "redisRequestedByFlags": true,
+    "redisConfigsMasked": [
+      "redis://127.0.0.1:24679",
+      "redis://127.0.0.1:24679",
+      "redis://127.0.0.1:24679",
+      "redis://127.0.0.1:24679"
+    ],
+    "storeMatchesRequest": true,
+    "peaks": {
+      "rssMB": 98,
+      "cpu": 10.6,
+      "lagP99": 77.5,
+      "bufferedKB": 0,
+      "rssMBSumAcrossProcesses": 391
+    },
+    "counters": {
+      "login_ok": 1,
+      "http_requests": 158,
+      "ws_connections_total": 10001,
+      "messages_in": 12511,
+      "messages_out": 60016,
+      "bytes_out": 20070181,
+      "ws_hello_timeouts": 5,
+      "ws_disconnections_total": 5,
+      "commands_accepted": 5,
+      "state_broadcasts": 20,
+      "applied_reports": 2505
+    },
+    "latencyMergedFromBuckets": {
+      "httpMs": {
+        "n": 158,
+        "p50": 2,
+        "p95": 5,
+        "p99": 30,
+        "max": 29.1037
+      },
+      "broadcastMs": {
+        "n": 20,
+        "p50": 200,
+        "p95": 500,
+        "p99": 500,
+        "max": 375
+      },
+      "publishMs": {
+        "n": 20,
+        "p50": 1,
+        "p95": 2,
+        "p99": 2,
+        "max": 2
+      },
+      "storeMs": {
+        "n": 69,
+        "p50": 1,
+        "p95": 2,
+        "p99": 20,
+        "max": 11.1366
+      }
+    },
+    "healthByInstance": [
+      {
+        "instance": "load-0",
+        "health": "ok",
+        "reasons": []
+      },
+      {
+        "instance": "load-1",
+        "health": "ok",
+        "reasons": []
+      },
+      {
+        "instance": "load-2",
+        "health": "ok",
+        "reasons": []
+      },
+      {
+        "instance": "load-3",
+        "health": "ok",
+        "reasons": []
+      }
+    ],
+    "perInstance": [
+      {
+        "instance": "load-0",
+        "base": "http://127.0.0.1:4209",
+        "polls": 40,
+        "store": {
+          "ok": true,
+          "latencyMs": 0.835,
+          "kind": "redis",
+          "config": {
+            "kind": "redis",
+            "url": "redis://127.0.0.1:24679",
+            "prefix": "lt:1791575867776:",
+            "commandHistory": 500
+          }
+        },
+        "health": "ok",
+        "healthReasons": [],
+        "peaks": {
+          "rssMB": 98,
+          "heapMB": 32,
+          "cpu": 10.3,
+          "lagP99": 76.6,
+          "bufferedKB": 0,
+          "connections": 2499
+        },
+        "connectionsNow": 2499,
+        "publicNow": 2498,
+        "counters": {
+          "login_ok": 1,
+          "http_requests": 41,
+          "ws_connections_total": 2501,
+          "messages_in": 3138,
+          "messages_out": 15034,
+          "bytes_out": 5023702,
+          "ws_hello_timeouts": 2,
+          "ws_disconnections_total": 2,
+          "commands_accepted": 5,
+          "state_broadcasts": 5,
+          "applied_reports": 632
+        }
+      },
+      {
+        "instance": "load-1",
+        "base": "http://127.0.0.1:4213",
+        "polls": 40,
+        "store": {
+          "ok": true,
+          "latencyMs": 0.7854,
+          "kind": "redis",
+          "config": {
+            "kind": "redis",
+            "url": "redis://127.0.0.1:24679",
+            "prefix": "lt:1791575867776:",
+            "commandHistory": 500
+          }
+        },
+        "health": "ok",
+        "healthReasons": [],
+        "peaks": {
+          "rssMB": 97,
+          "heapMB": 33,
+          "cpu": 7.2,
+          "lagP99": 77.5,
+          "bufferedKB": 0,
+          "connections": 2499
+        },
+        "connectionsNow": 2499,
+        "publicNow": 2499,
+        "counters": {
+          "ws_connections_total": 2500,
+          "messages_in": 3121,
+          "messages_out": 14994,
+          "bytes_out": 5015493,
+          "http_requests": 39,
+          "ws_hello_timeouts": 1,
+          "ws_disconnections_total": 1,
+          "state_broadcasts": 5,
+          "applied_reports": 621
+        }
+      },
+      {
+        "instance": "load-2",
+        "base": "http://127.0.0.1:4216",
+        "polls": 40,
+        "store": {
+          "ok": true,
+          "latencyMs": 0.7759,
+          "kind": "redis",
+          "config": {
+            "kind": "redis",
+            "url": "redis://127.0.0.1:24679",
+            "prefix": "lt:1791575867776:",
+            "commandHistory": 500
+          }
+        },
+        "health": "ok",
+        "healthReasons": [],
+        "peaks": {
+          "rssMB": 98,
+          "heapMB": 33,
+          "cpu": 10.6,
+          "lagP99": 76.8,
+          "bufferedKB": 0,
+          "connections": 2499
+        },
+        "connectionsNow": 2499,
+        "publicNow": 2499,
+        "counters": {
+          "ws_connections_total": 2500,
+          "messages_in": 3106,
+          "messages_out": 14994,
+          "bytes_out": 5015493,
+          "http_requests": 39,
+          "ws_hello_timeouts": 1,
+          "ws_disconnections_total": 1,
+          "state_broadcasts": 5,
+          "applied_reports": 606
+        }
+      },
+      {
+        "instance": "load-3",
+        "base": "http://127.0.0.1:4219",
+        "polls": 40,
+        "store": {
+          "ok": true,
+          "latencyMs": 0.2793,
+          "kind": "redis",
+          "config": {
+            "kind": "redis",
+            "url": "redis://127.0.0.1:24679",
+            "prefix": "lt:1791575867776:",
+            "commandHistory": 500
+          }
+        },
+        "health": "ok",
+        "healthReasons": [],
+        "peaks": {
+          "rssMB": 98,
+          "heapMB": 33,
+          "cpu": 8.1,
+          "lagP99": 75.8,
+          "bufferedKB": 0,
+          "connections": 2499
+        },
+        "connectionsNow": 2499,
+        "publicNow": 2499,
+        "counters": {
+          "ws_connections_total": 2500,
+          "messages_in": 3146,
+          "messages_out": 14994,
+          "bytes_out": 5015493,
+          "http_requests": 39,
+          "ws_hello_timeouts": 1,
+          "ws_disconnections_total": 1,
+          "state_broadcasts": 5,
+          "applied_reports": 646
+        }
+      }
+    ]
+  },
+  "generator": {
+    "eventLoopLagP99Ms": 69.9,
+    "eventLoopLagMaxMs": 1619,
+    "cpuPeakPct": 72.4,
+    "rssMB": 105,
+    "saturated": true,
+    "unexpectedCloses": 0,
+    "errors": 0
+  },
+  "clientsSummary": {
+    "attempted": 10000,
+    "established": 9995,
+    "failed": 0,
+    "closedUnexpected": 0,
+    "closedByTool": 0,
+    "errors": 0,
+    "recovered": 0,
+    "duplicatesDropped": 0,
+    "outOfOrder": 0,
+    "appliedReportsSent": 2505,
+    "welcomeReceived": 9995
+  },
+  "finishedAt": "2026-10-09T19:59:08.990Z",
+  "durationS": 81.2,
+  "verdict": {
+    "criteria": {
+      "1 conexiones >= 99,5 %": true,
+      "2 conexión p95<=1500 y p99<=3000 ms": false,
+      "3 pérdida <= 0,1 %": true,
+      "4 distribución p95<=250 y p99<=500 ms": false,
+      "5 aplicación simulada p99<=150 ms": true,
+      "6 servidor: lag p99<=100, sin heartbeat/slow/store errors, salud ok": true,
+      "7 corte masivo (si se pidió): >=99,5 % en <=30 s y orden posterior a todos": "no aplica"
+    },
+    "failed": [
+      "2 conexión p95<=1500 y p99<=3000 ms",
+      "4 distribución p95<=250 y p99<=500 ms"
+    ],
+    "result": "NO APROBADA",
+    "caveats": [
+      "El generador estaba saturado (lag p99 > 50 ms): el criterio 5 y las latencias NO son concluyentes."
+    ]
+  }
+}

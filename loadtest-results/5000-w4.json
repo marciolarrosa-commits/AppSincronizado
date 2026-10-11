@@ -1,0 +1,143 @@
+{
+  "label": "5000-w4",
+  "startedAt": "2026-10-09T18:39:35.961Z",
+  "node": "v24.18.0",
+  "platform": "win32",
+  "params": {
+    "CLIENTS": 5000,
+    "RATE": 400,
+    "COMMANDS": 5,
+    "INTERVAL": 1500,
+    "LEAD": 1500,
+    "STORM": 1,
+    "INSTANCES": 1,
+    "redis": false
+  },
+  "sessionId": "6X9JRR",
+  "rampMs": 19432,
+  "connections": {
+    "requested": 5000,
+    "established": 5000,
+    "failed": 0,
+    "rejectedByReason": {},
+    "connectMs": {
+      "n": 5000,
+      "p50": 84,
+      "p95": 438,
+      "p99": 1509,
+      "max": 5121
+    },
+    "serverReportedPublic": 1249
+  },
+  "commands": {
+    "count": 5,
+    "accepted": 5,
+    "acceptMs": {
+      "n": 5,
+      "p50": 6,
+      "p95": 11,
+      "p99": 11,
+      "max": 11
+    },
+    "deliveredPerCommand": [
+      5000,
+      5000,
+      5000,
+      5000,
+      5000
+    ],
+    "expectedPerCommand": 5000,
+    "lossPct": 0,
+    "distributionLatencyMs": {
+      "n": 25000,
+      "p50": 91,
+      "p95": 224,
+      "p99": 261,
+      "max": 269
+    },
+    "simulatedApplyDeviationMs": {
+      "n": 25000,
+      "p50": 103,
+      "p95": 861,
+      "p99": 907,
+      "max": 934
+    },
+    "serverMessagesOutDelta": 6245,
+    "windowSeconds": 13.2,
+    "masterStatsSample": {
+      "responded": 1626,
+      "onTimePct": 61.6,
+      "p95": 200,
+      "p99": 200
+    }
+  },
+  "storm": {
+    "dropped": 5000,
+    "recovered": 5000,
+    "recoveryMs": 8976,
+    "reconnectMs": {
+      "n": 5000,
+      "p50": 1536,
+      "p95": 2468,
+      "p99": 2564,
+      "max": 2585
+    },
+    "unexpectedCloses": 0,
+    "deliveredAfterRecovery": 5000,
+    "expectedAfterRecovery": 5000,
+    "readyAfter": 5000
+  },
+  "server": {
+    "peaks": {
+      "rssMB": 84,
+      "cpu": 8.4,
+      "lagP99": 575.1,
+      "heapMB": 23,
+      "bufferedKB": 0,
+      "polls": 25
+    },
+    "healthStatus": "ok",
+    "healthReasons": [],
+    "counters": {
+      "ws_connections_total": 2499,
+      "reconnects": 1250,
+      "bytes_out": 3304401
+    },
+    "latency": {
+      "httpMs": {
+        "n": 25,
+        "p50": 2,
+        "p95": 10,
+        "p99": 30,
+        "max": 27.3974
+      },
+      "broadcastMs": {
+        "n": 6,
+        "p50": 150,
+        "p95": 200,
+        "p99": 200,
+        "max": 193
+      },
+      "publishMs": {
+        "n": 6,
+        "p50": 1,
+        "p95": 5,
+        "p99": 5,
+        "max": 5
+      },
+      "storeMs": {
+        "n": 10,
+        "p50": 1,
+        "p95": 2,
+        "p99": 2,
+        "max": 1.1585
+      }
+    }
+  },
+  "client": {
+    "generatorRssMB": 184,
+    "unexpectedCloses": 0,
+    "errors": 0
+  },
+  "finishedAt": "2026-10-09T18:40:27.380Z"
+}

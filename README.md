@@ -1,83 +1,57 @@
-# Destello·Sync V2 — control remoto del público
+# Destello·Sync V3.1
 
-Esta V2 agrega un canal de control central para que un teléfono/PC Master pueda controlar en tiempo real el color y efectos de todos los celulares que escanearon el QR.
+Sincroniza las pantallas de los teléfonos de un público: cada persona abre una web (sin instalar nada) escaneando un QR y un operador controla colores y
+efectos en tiempo real desde `/master`. WebSocket real (`ws`), estado autoritativo en el servidor, ejecución programada (`executeAt`) con reloj sincronizado,
+reconexión automática y, opcionalmente, Redis/Valkey para varias instancias.
 
-## Qué agrega
+> **Estado honesto**: probado y funcionando en una instancia y en 2 instancias + Redis (ver `docs/CARGA.md`). **No** está validado para 60 000 dispositivos:
+> ese es el objetivo de ingeniería, no una capacidad demostrada. Ver `docs/OPERACION_EVENTO_MASIVO.md`.
 
-- `/master`: panel de operador.
-- Creación de sesiones con código de 6 caracteres.
-- QR público por sesión.
-- Conteo de celulares conectados en tiempo real.
-- Broadcast de estado mediante Server-Sent Events (SSE).
-- Colores fijos.
-- Efecto pulso.
-- Efecto strobe.
-- Programación con `executeAt` para que el cambio ocurra sincronizado.
-- Token privado por sesión para autorizar comandos del Master.
-- El cliente público no necesita cámara ni micrófono para el nuevo modo remoto.
-- Se conserva la aplicación original y su modo de música/flash local.
+## Rutas
 
-## Requisitos
+| Ruta | Descripción |
+|---|---|
+| `GET /` | App del público. `/?s=CODIGO&mode=remote` abre la pantalla controlada por el Master (el QR apunta acá; formato V3.0 conservado). |
+| `GET /master` | Panel del operador (requiere contraseña). |
+| `WS /ws` | Canal de tiempo real (protocolo en `docs/PROTOCOLO.md`). |
+| `POST /api/master/login`, `POST/GET /api/sessions`, `POST /api/sessions/:id/master-token`, `…/revoke` | API del operador (Bearer). |
+| `GET /api/sessions/:id/status` | Público: solo `exists`. Con token de operador: estado y conteos. |
+| `GET /healthz` · `/readyz` · `/api/admin/status` · `/metrics` | Vivo · listo · detalle (operador) · Prometheus (token). |
 
-- Node.js 20 o superior.
+## Inicio rápido (local)
 
-## Ejecutar
-
-```powershell
-node server.js
+```bash
+npm install
+npm start                 # imprime una contraseña temporal para /master si no definís MASTER_PASSWORD
+# abrir http://localhost:10000/master  →  ingresar  →  Crear sesión  →  escanear el QR (o abrir el enlace en otra pestaña/teléfono)
 ```
 
-Abrir:
+Producción: `NODE_ENV=production MASTER_PASSWORD=<≥12 caracteres> npm start`. Varias instancias: `REDIS_URL=redis://…` (ver `docs/DESPLIEGUE_RENDER.md`).
 
-```text
-http://localhost:3000/master
+## Pruebas
+
+```bash
+npm test                  # 102 pruebas: efectos, plataforma/PWA, rastreador de ACK, funcionales, seguridad, WebSocket, compatibilidad, idempotencia, robustez, auditoría, distribución, generador de carga
+REDIS_SERVER=/ruta/a/redis-server npm test    # incluye distribución con 2 instancias + Redis REAL (si no, esas 6 se omiten y se informa)
+npm run check             # sintaxis de todo el JavaScript
+npm run test:browser      # 23 E2E en Chrome/Edge real, incluida la cobertura de pantalla con emulación móvil (puppeteer-core; CHROME_PATH opcional)
+node tools/loadtest.js --spawn --clients 1000 --commands 5 --storm 1   # prueba de carga (ver docs/CARGA.md)
 ```
 
-Crear sesión → mostrar el QR → escanear desde celulares.
+## Documentación
 
-## Prueba local
+* `docs/ARQUITECTURA.md` — qué había, defectos corregidos, componentes, estado autoritativo, etapas de escalado.
+* `docs/PROTOCOLO.md` — mensajes, esquemas, códigos, sincronización de reloj.
+* `docs/CONFIGURACION.md` — todas las variables de entorno.
+* `docs/SEGURIDAD.md` — controles, pruebas y riesgos residuales.
+* `docs/OBSERVABILIDAD.md` — logs, salud, métricas, alertas.
+* `docs/CARGA.md` — metodología, criterios (definidos antes) y resultados por volumen.
+* `docs/DESPLIEGUE_RENDER.md` — límites de Render verificados, despliegue, recuperación y **rollback**.
+* `docs/COBERTURA_PANTALLA.md` — cobertura total de pantalla, modo espectáculo, Android vs iOS, PWA, protocolo de ensayo físico.
+* `docs/OPERACION_EVENTO_MASIVO.md` — requisitos y checklist para un evento grande; limitaciones de navegadores móviles.
+* `docs/AUDITORIA_V3.1.md` y `docs/INFORME_AUDITORIA_V3.1.md` — auditoría posterior: hallazgos por gravedad, correcciones, pruebas y riesgos (`INFORME_FINAL.md` es el informe de la etapa anterior).
 
-Para probar varios teléfonos en la misma red LAN, el servidor debe escuchar en una interfaz accesible y los teléfonos deben abrir la IP del PC, por ejemplo:
+## Seguridad visual
 
-```text
-http://192.168.1.50:3000/master
-```
-
-El QR se genera con la URL pública que recibe el servidor. Para producción se recomienda usar HTTPS y configurar:
-
-```text
-PUBLIC_BASE_URL=https://tu-dominio.example
-PORT=3000
-```
-
-## Arquitectura del MVP
-
-```text
-Master
-  |
-  | POST command + master token
-  v
-Node.js
-  |
-  | SSE
-  +---- celular 1
-  +---- celular 2
-  +---- celular N
-```
-
-Los comandos son pequeños y se emiten como estado de sesión; el teléfono calcula localmente el efecto visual. Esto evita enviar una orden individual por dispositivo.
-
-## Próxima etapa de producción
-
-Para eventos grandes conviene agregar:
-
-1. autenticación real del operador;
-2. persistencia de sesiones;
-3. Redis/pub-sub si se horizontaliza el backend;
-4. métricas y heartbeat por dispositivo;
-5. grupos/tribunas/sectores;
-6. timeline de shows;
-7. sincronización de reloj más precisa;
-8. rate limiting y protección del endpoint Master;
-9. HTTPS/WSS;
-10. Firebase/App Check o un backend de identidad equivalente si se decide usar Firebase.
+El strobe está **deshabilitado por defecto**, limitado a 3 Hz y con duración máxima; se habilita por sesión confirmando una advertencia de fotosensibilidad.
+Los teléfonos pueden desactivar efectos ("Efectos: desactivados") y respetan `prefers-reduced-motion`. **DETENER TODO** (tecla Esc en el panel) apaga todas las pantallas.

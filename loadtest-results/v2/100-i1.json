@@ -1,0 +1,252 @@
+{
+  "label": "100-i1",
+  "startedAt": "2026-10-09T19:54:33.015Z",
+  "node": "v24.18.0",
+  "platform": "win32 10.0.22631",
+  "cpus": 12,
+  "params": {
+    "CLIENTS": 100,
+    "RATE": 400,
+    "COMMANDS": 5,
+    "INTERVAL": 1500,
+    "LEAD": 1500,
+    "STORM": 1,
+    "INSTANCES": 1,
+    "WORKERS": 1,
+    "redisRequestedByFlags": false,
+    "extraEnv": []
+  },
+  "sessionId": "YLXYSE",
+  "rampMs": 342,
+  "connections": {
+    "attempted": 100,
+    "established": 100,
+    "failed": 0,
+    "rejectedByReason": {},
+    "connectMs": {
+      "n": 100,
+      "p50": 58,
+      "p95": 76,
+      "p99": 76,
+      "max": 76
+    }
+  },
+  "commands": {
+    "sent": 5,
+    "acceptedByServer": 5,
+    "rejectedByServer": 0,
+    "acceptMs": {
+      "n": 5,
+      "p50": 19,
+      "p95": 27,
+      "p99": 27,
+      "max": 27
+    },
+    "deliveredPerCommand": [
+      100,
+      100,
+      100,
+      100,
+      100
+    ],
+    "expectedPerCommand": 100,
+    "totalDelivered": 500,
+    "totalExpected": 500,
+    "lost": 0,
+    "duplicatesDroppedByClients": 0,
+    "outOfOrderDropped": 0,
+    "lossPct": 0,
+    "distributionLatencyMs": {
+      "n": 500,
+      "p50": 6,
+      "p95": 11,
+      "p99": 12,
+      "max": 13
+    },
+    "simulatedApplyDeviationMs": {
+      "n": 500,
+      "p50": 12,
+      "p95": 22,
+      "p99": 24,
+      "max": 24,
+      "note": "jitter del temporizador del generador; NO es una pantalla real"
+    },
+    "appliedReportsSentBySimulatedClients": 500,
+    "masterStatsAggregatedByServer": {
+      "responded": 100,
+      "onTimePct": 100,
+      "p50": 10,
+      "p95": 10,
+      "p99": 10,
+      "note": "reportes de clientes simulados"
+    },
+    "windowSeconds": 11.7,
+    "serverMessagesOutDeltaAggregated": 523,
+    "serverMessagesPerSecond": 45,
+    "serverBytesOutDeltaAggregated": 152033
+  },
+  "storm": {
+    "dropped": 100,
+    "recovered": 100,
+    "recoveryMs": 11914,
+    "reconnectMs": {
+      "n": 100,
+      "p50": 4,
+      "p95": 5,
+      "p99": 5,
+      "max": 5
+    },
+    "unexpectedClosesDuringStorm": 0,
+    "deliveredAfterRecovery": 100,
+    "expectedAfterRecovery": 100,
+    "readyAfter": 100
+  },
+  "server": {
+    "note": "Contadores = suma de los acumulados de CADA proceso (una vez por proceso). Histogramas = suma de buckets. Picos = máximo entre procesos.",
+    "processesObserved": 1,
+    "processesExpected": 1,
+    "observedAllProcesses": true,
+    "effectiveStore": "memory",
+    "redisRequestedByFlags": false,
+    "redisConfigsMasked": [
+      null
+    ],
+    "storeMatchesRequest": true,
+    "peaks": {
+      "rssMB": 54,
+      "cpu": 2.5,
+      "lagP99": 19.8,
+      "bufferedKB": 0,
+      "rssMBSumAcrossProcesses": 54
+    },
+    "counters": {
+      "login_ok": 1,
+      "http_requests": 18,
+      "ws_connections_total": 201,
+      "messages_in": 807,
+      "messages_out": 844,
+      "bytes_out": 293803,
+      "state_broadcasts": 6,
+      "commands_accepted": 6,
+      "applied_reports": 600,
+      "ws_disconnections_total": 100,
+      "reconnects": 100
+    },
+    "latencyMergedFromBuckets": {
+      "httpMs": {
+        "n": 18,
+        "p50": 1,
+        "p95": 10,
+        "p99": 10,
+        "max": 8.8961
+      },
+      "broadcastMs": {
+        "n": 6,
+        "p50": 10,
+        "p95": 20,
+        "p99": 20,
+        "max": 12
+      },
+      "publishMs": {
+        "n": 6,
+        "p50": 1,
+        "p95": 1,
+        "p99": 1,
+        "max": 1
+      },
+      "storeMs": {
+        "n": 12,
+        "p50": 1,
+        "p95": 20,
+        "p99": 20,
+        "max": 12
+      }
+    },
+    "healthByInstance": [
+      {
+        "instance": "load-0",
+        "health": "ok",
+        "reasons": []
+      }
+    ],
+    "perInstance": [
+      {
+        "instance": "load-0",
+        "base": "http://127.0.0.1:50934",
+        "polls": 17,
+        "store": {
+          "ok": true,
+          "latencyMs": 0,
+          "kind": "memory",
+          "config": {
+            "kind": "memory",
+            "commandHistory": 500
+          }
+        },
+        "health": "ok",
+        "healthReasons": [],
+        "peaks": {
+          "rssMB": 54,
+          "heapMB": 9,
+          "cpu": 2.5,
+          "lagP99": 19.8,
+          "bufferedKB": 0,
+          "connections": 101
+        },
+        "connectionsNow": 101,
+        "publicNow": 100,
+        "counters": {
+          "login_ok": 1,
+          "http_requests": 18,
+          "ws_connections_total": 201,
+          "messages_in": 807,
+          "messages_out": 844,
+          "bytes_out": 293803,
+          "state_broadcasts": 6,
+          "commands_accepted": 6,
+          "applied_reports": 600,
+          "ws_disconnections_total": 100,
+          "reconnects": 100
+        }
+      }
+    ]
+  },
+  "generator": {
+    "eventLoopLagP99Ms": 19,
+    "eventLoopLagMaxMs": 42.8,
+    "cpuPeakPct": 4.6,
+    "rssMB": 56,
+    "saturated": false,
+    "unexpectedCloses": 0,
+    "errors": 0
+  },
+  "clientsSummary": {
+    "attempted": 200,
+    "established": 200,
+    "failed": 0,
+    "closedUnexpected": 0,
+    "closedByTool": 100,
+    "errors": 0,
+    "recovered": 100,
+    "duplicatesDropped": 0,
+    "outOfOrder": 0,
+    "appliedReportsSent": 600,
+    "welcomeReceived": 200
+  },
+  "finishedAt": "2026-10-09T19:55:00.353Z",
+  "durationS": 27.3,
+  "verdict": {
+    "criteria": {
+      "1 conexiones >= 99,5 %": true,
+      "2 conexión p95<=1500 y p99<=3000 ms": true,
+      "3 pérdida <= 0,1 %": true,
+      "4 distribución p95<=250 y p99<=500 ms": true,
+      "5 aplicación simulada p99<=150 ms": true,
+      "6 servidor: lag p99<=100, sin heartbeat/slow/store errors, salud ok": true,
+      "7 corte masivo (si se pidió): >=99,5 % en <=30 s y orden posterior a todos": true
+    },
+    "failed": [],
+    "result": "APROBADA",
+    "caveats": []
+  }
+}

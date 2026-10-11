@@ -1,0 +1,162 @@
+# Protocolo WebSocket (versión 1)
+
+Endpoint: `wss://<host>/ws` (en local `ws://localhost:10000/ws`). Mensajes de **texto JSON**; los binarios se rechazan (cierre 1003).
+Tamaño máximo por mensaje entrante: `MAX_MESSAGE_BYTES` (2048 por defecto; el excedente cierra con 1009).
+Todo mensaje puede llevar `protocolVersion: 1`; otra versión se rechaza (`UNSUPPORTED_VERSION`). Los servidor→cliente siempre la incluyen.
+
+Los campos desconocidos se **rechazan** (`UNKNOWN_FIELD`): nada se acepta "por las dudas".
+
+## Handshake
+
+La URL no lleva datos sensibles. Lo primero que debe enviar el cliente (antes de `HELLO_TIMEOUT_MS`, 5 s) es `hello`:
+
+```jsonc
+// participante (público)
+{ "protocolVersion":1, "type":"hello", "role":"public", "sessionId":"K7M2QD", "deviceId":"<8-80 [A-Za-z0-9_-]>", "resumeVersion":12, "reconnect":true }
+// Master
+{ "protocolVersion":1, "type":"hello", "role":"master", "sessionId":"K7M2QD", "token":"<token de Master de ESA sesión>" }
+```
+
+Respuesta `welcome`:
+
+```jsonc
+{ "protocolVersion":1, "type":"welcome", "serverTimestamp":1791570000000, "sessionId":"K7M2QD", "role":"public", "deviceId":"...",
+  "state": { "commandId":"c9f…", "stateVersion":12, "serverTimestamp":…, "executeAt":…, "payload": {…} },
+  "config": { "heartbeatMs":20000, "clockPingIntervalMs":15000, "onTimeToleranceMs":100, "minLeadMs":300,
+              "maxStrobeHz":3, "strobeEnabled":false, "strobeAllowed":true, "maxStrobeDurationMs":30000 } }
+```
+
+`state` en el `welcome` es el estado **vigente** (autoritativo); el cliente lo toma como nueva línea base de versiones (también tras un reinicio del servidor).
+Si su `executeAt` aún no llegó, se programa (no se aplica antes de tiempo).
+
+## Cliente → servidor
+
+| `type` | Quién | Campos | Notas |
+|---|---|---|---|
+| `hello` | todos | ver arriba | obligatorio y único |
+| `ping` | todos | `t0` (número, reloj monotónico local) | respuesta `pong`; sirve para sincronizar el reloj y como señal de vida |
+| `applied` | público | `commandId`, `stateVersion`, `deviationMs` (aplicado − `executeAt`), `receiveLeadMs?` | **muestreado** (`ackRate`); el servidor agrega, no guarda uno por teléfono |
+| `command` | Master | `commandId?`, `leadMs?`, `payload` | orden visual validada |
+| `stop` | Master | `commandId?` | **parada de emergencia**: prioritaria (sin límite de tasa), `executeAt = ahora`, vuelve a pantalla apagada |
+| `setConfig` | Master | `strobeEnabled`, `acknowledgeRisk` | habilitar strobe exige `acknowledgeRisk:true` |
+
+### `payload` de `command`
+
+| Campo | Efectos | Rango / valor |
+|---|---|---|
+| `effect` | todos | `off` · `solid` · `fade` · `pulse` · `strobe` |
+| `color` | ≠ off | `#RRGGBB` |
+| `color2` | fade, pulse, strobe | `#RRGGBB` (por defecto `#000000`) |
+| `intensity` | todos | 0,05 … 1 |
+| `fadeMs` | solid, fade | 0 … 10 000 (fade: 1 500 por defecto) |
+| `periodMs` | pulse | 600 … 10 000 (2 000) |
+| `hz` | strobe | 0,5 … `MAX_STROBE_HZ` (≤ 3) |
+| `duty` | strobe | 0,1 … 0,5 |
+| `durationMs` | pulse, strobe | pulse: 0 (sin límite) … `MAX_PULSE_DURATION_MS`; **strobe siempre con duración**: 500 … `MAX_STROBE_DURATION_MS` (30 s) |
+
+Semántica: `solid` = ir al color (con transición opcional desde lo que se ve); `fade` = transición programada de `color` a `color2`;
+`pulse` = oscila entre `color2` y `color`; `strobe` = destellos on/off. Al cumplirse `durationMs`, pulse/strobe quedan en **color fijo**.
+Strobe bloqueado por defecto: error `STROBE_DISABLED` hasta que el Master lo habilite confirmando el riesgo.
+
+## Servidor → cliente
+
+| `type` | Destino | Contenido |
+|---|---|---|
+| `welcome` | quien se une | ver arriba |
+| `state` | todos | `{sessionId, commandId, stateVersion, serverTimestamp, executeAt, payload, ackRate}` (+ `resync:true` si es un reenvío tras contrapresión) |
+| `pong` | quien envió `ping` | `{t0, serverTimestamp}` |
+| `ack` | Master emisor | **la orden fue aceptada y publicada** (`commandId`, `stateVersion`, `executeAt`, `duplicate`) |
+| `stats` | Masters | agregado de **aplicación real** (muestra): `responded`, `onTime`, `late`, `lateArrival`, `onTimePct`, `deviationP50/P95/P99Ms`, `connected` |
+| `presence` | Masters | `connected` (suma de todas las instancias, sin Master), `localConnected`, `health` (estado de salud para advertencias) |
+| `config` | Masters | `strobeEnabled` |
+| `restart` | todos | el servidor se está reiniciando: `reconnectAfterMs` sugerido (con jitter) |
+| `error` | quien lo causó | `code`, `message`, `commandId?` |
+
+**Aceptada ≠ aplicada**: `ack` solo prueba que el servidor validó y publicó; `stats` informa cuántos dispositivos (de una muestra) ya la aplicaron y con qué desviación.
+
+### Códigos de error
+
+`INVALID_JSON`, `INVALID_MESSAGE`, `UNKNOWN_TYPE`, `UNKNOWN_FIELD`, `INVALID_FIELD`, `OUT_OF_RANGE`, `INVALID_COLOR`, `INVALID_EFFECT`, `INVALID_ROLE`,
+`INVALID_SESSION`, `UNSUPPORTED_VERSION`, `MESSAGE_TOO_LARGE`, `NOT_JOINED`, `ALREADY_JOINED`, `FORBIDDEN`, `UNAUTHORIZED`, `SESSION_NOT_FOUND`, `SESSION_FULL`,
+`TOO_MANY_MASTERS`, `RATE_LIMITED`, `STROBE_DISABLED`, `RISK_NOT_ACKNOWLEDGED`, `PUBLISH_FAILED`, `UNAVAILABLE`, `DRAINING`, `DEVICE_REPLACED`.
+
+### Códigos de cierre WebSocket y qué debe hacer el cliente
+
+| Código | Significado | Cliente |
+|---|---|---|
+| 1012 | reinicio/despliegue | reconectar con jitter (usa `restart.reconnectAfterMs`) |
+| 1013 | reintentar luego (capacidad, sesión llena, drenaje) | backoff |
+| 1008 | violación de protocolo | corregir; no reintentar en bucle |
+| 1009 / 1003 | mensaje demasiado grande / binario | — |
+| 4401 | token inválido, vencido o revocado | Master: pedir token nuevo |
+| 4404 | sesión inexistente o vencida | público: esperar y reintentar despacio; Master: re-crear la sesión con el mismo código |
+| 4408 | no envió `hello` a tiempo | reconectar |
+| 4413 | consumidor lento (buffer saturado) | reconectar |
+| 4429 | abuso de frecuencia | backoff largo |
+| 4002 | el mismo dispositivo se abrió en otra pestaña | **no** reintentar |
+
+## Sincronización del reloj
+
+Cliente: ráfaga de 6 `ping` al conectar y 3 cada `clockPingIntervalMs`. Para cada `pong`: `rtt = t1 − t0`, `offset = serverTimestamp + rtt/2 − t1`
+(con `t0`, `t1` de `performance.now()`). Se conservan las últimas 12 muestras y se usa la de **menor RTT**. Hora del servidor = `performance.now() + offset`.
+No se usa el reloj del teléfono como autoridad.
+
+Con varias instancias, cada instancia tiene su propio reloj: confiamos en que los hosts estén sincronizados por NTP (error esperable de pocos ms; **no medido** en Render).
+
+## Adaptador V3.0 (solo participantes)
+
+`/ws?session=CODIGO&role=public&deviceId=ID` sin `hello` → el servidor traduce a los mensajes antiguos (`hello`, `state{version,color,effect,intensity,executeAt,active,label}`, `pong{clientTime,serverTime}`).
+El Master V3.0 no es compatible.
+
+---
+
+# Semántica de estado, comandos y confirmaciones (auditoría V3.1)
+
+## Cuatro cosas distintas
+
+| Concepto | Qué es | Dónde vive | Cómo se garantiza |
+|---|---|---|---|
+| **Estado deseado actual** | Lo que TODAS las pantallas deberían mostrar ahora: un único registro por sesión (`stateVersion`, `executeAt`, `payload`, `incarnation`). | Servidor (memoria o Redis). | Versión monotónica asignada de forma atómica. Es lo que recibe quien entra o reconecta (`welcome.state`) y lo que reenvía la reconciliación. |
+| **Comando transitorio** | Una orden del Master (`command`/`stop`) con `commandId`. Se convierte en el nuevo estado deseado. | Viaja una vez por el bus; solo se recuerda su `commandId` (ventana de 500) para la idempotencia. | Idempotencia por `commandId`: un reenvío NO se vuelve a aplicar ni a publicar. |
+| **Confirmación de recepción** (`ack`) | "El servidor validó, aceptó y publicó tu orden" (`commandId`, `stateVersion`, `executeAt`, `duplicate`). | Mensaje al Master emisor. | Solo prueba la aceptación. **No demuestra que ninguna pantalla haya cambiado.** |
+| **Confirmación de aplicación** (`applied` → `stats`) | Un teléfono informa que ejecutó el estado y con qué desviación respecto de `executeAt` (medida con su reloj sincronizado). | Se agrega por versión (HINCRBY) y se muestra al Master. | Es una **muestra** (`ackRate`) y la mide el propio cliente: prueba que el código del cliente aplicó el estado, **no** que el panel físico mostró el color en ese instante (latencia de pantalla no medible desde la página). |
+
+**Una pantalla desconectada recupera el estado actual sin reproducir órdenes antiguas**: al reconectar recibe `welcome.state` (un solo estado, el vigente); además,
+la **reconciliación** (al recuperarse el suscriptor de Redis y cada `RECONCILE_INTERVAL_MS`) entrega el estado vigente a los teléfonos de una instancia que se
+haya perdido una publicación. Nunca se reproduce el historial.
+
+## `incarnation`
+
+Cada estado incluye `incarnation` = instante de creación de la sesión. Si una sesión se pierde y se re-crea con el mismo código, las versiones vuelven a empezar
+en 1: hub y clientes comparan `incarnation` y reinician su línea base en lugar de descartar las órdenes nuevas como "viejas". Un cliente que desconoce el campo
+(V3.0) lo ignora.
+
+## Idempotencia de comandos (servidor)
+
+* Ventana de los últimos `COMMAND_HISTORY` (500) `commandId` por sesión, con la misma caducidad que la sesión. En Redis: hash `cmd:<sesión>` + zset `cmdz:<sesión>` recortados **dentro del mismo script Lua atómico** que asigna la versión y publica; en memoria: un `Map` con el mismo límite.
+* `commandId` ya visto → `ack` con `duplicate:true` y la **versión y `executeAt` ORIGINALES** de ese comando; no se publica ni cambia el estado, aunque ya existan comandos más nuevos (A, B, reenvío de A → el estado sigue siendo B).
+* Funciona entre instancias (el registro es del almacenamiento compartido). Fuera de la ventana (más de 500 órdenes después) un `commandId` viejo se trataría como nuevo: el Master solo reenvía comandos de ≤ 15 s (ver abajo), por lo que la ventana cubre con holgura el límite de 5 órdenes/s.
+
+## Política de comandos pendientes del Master (`public/js/pending.js`)
+
+* Varios comandos en vuelo, **cada uno rastreado por su `commandId`**; un ACK solo confirma el suyo.
+* **El último gana**: al crear un comando nuevo los anteriores quedan *superados* (no se reintentan ni se reenvían tras reconectar: el protocolo es de estado y reenviar una orden vieja podría revertir la nueva).
+* Sin ACK en 3 s (la parada de emergencia, 1,5 s) se reenvía el **mismo** `commandId`, hasta 3 intentos; después se avisa al operador.
+* Si cae la conexión con comandos pendientes: al reconectar se reenvía **solo el más reciente** y únicamente si tiene ≤ 15 s.
+* ACK **duplicado**, **desconocido** (id inexistente o sin id) o **tardío** (de un comando ya superado) se clasifican y se ignoran: nunca limpian a otro comando ni tocan el estado mostrado.
+* Un `error` con `commandId` cierra solo ese comando.
+
+## Validación en el cliente
+
+El cliente no confía ciegamente en el servidor: un `state` con payload malformado (efecto desconocido, color inválido, números no finitos) se **ignora** y no altera la línea base de versiones; ante cualquier excepción de render se muestra el estado seguro (apagado). El strobe se limita en el cliente a 3 Hz y 30 s aunque el servidor enviara otra cosa.
+
+## Precisión temporal medida (Chrome real, mismo reloj; `e2e/red-movil.test.js`)
+
+| Condición de red | Desviación real respecto de `executeAt` |
+|---|---|
+| Sin latencia añadida (10 contextos) | 1–6 ms |
+| 150 ms por sentido, simétrico | 9 ms |
+| Bajada 400 ms / subida 20 ms (asimétrico) | **193 ms** (≈ asimetría / 2 = 190 ms): límite conocido de la estimación tipo NTP; no se corrige con más muestras |
+| Bajada 2,5 s con margen de 1,5 s | la orden llega tarde: se aplica de inmediato y se contabiliza como `lateArrival` |
+
+En redes móviles reales la asimetría de subida/bajada es habitual: la sincronía entre teléfonos no se promete mejor que ≈ la mitad de esa asimetría.

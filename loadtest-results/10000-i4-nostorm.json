@@ -1,0 +1,126 @@
+{
+  "label": "10000-i4-nostorm",
+  "startedAt": "2026-10-09T18:48:11.260Z",
+  "node": "v24.18.0",
+  "platform": "win32",
+  "params": {
+    "CLIENTS": 10000,
+    "RATE": 400,
+    "COMMANDS": 5,
+    "INTERVAL": 1500,
+    "LEAD": 1500,
+    "STORM": 0,
+    "INSTANCES": 4,
+    "redis": false
+  },
+  "sessionId": "ER9QAN",
+  "rampMs": 26750,
+  "connections": {
+    "requested": 10000,
+    "established": 10000,
+    "failed": 0,
+    "rejectedByReason": {},
+    "connectMs": {
+      "n": 10000,
+      "p50": 57,
+      "p95": 79,
+      "p99": 150,
+      "max": 188
+    },
+    "serverReportedPublic": 2500
+  },
+  "commands": {
+    "count": 5,
+    "accepted": 5,
+    "acceptMs": {
+      "n": 5,
+      "p50": 7,
+      "p95": 26,
+      "p99": 26,
+      "max": 26
+    },
+    "deliveredPerCommand": [
+      10000,
+      10000,
+      10000,
+      10000,
+      10000
+    ],
+    "expectedPerCommand": 10000,
+    "lossPct": 0,
+    "distributionLatencyMs": {
+      "n": 50000,
+      "p50": 184,
+      "p95": 427,
+      "p99": 524,
+      "max": 540
+    },
+    "simulatedApplyDeviationMs": {
+      "n": 50000,
+      "p50": 90,
+      "p95": 166,
+      "p99": 184,
+      "max": 205
+    },
+    "serverMessagesOutDelta": 12500,
+    "windowSeconds": 12.5,
+    "masterStatsSample": {
+      "responded": 1637,
+      "onTimePct": 51.8,
+      "p95": 200,
+      "p99": 200
+    }
+  },
+  "server": {
+    "peaks": {
+      "rssMB": 104,
+      "cpu": 12.5,
+      "lagP99": 85.1,
+      "heapMB": 40,
+      "bufferedKB": 0,
+      "polls": 88
+    },
+    "healthStatus": "ok",
+    "healthReasons": [],
+    "counters": {
+      "ws_connections_total": 2500,
+      "bytes_out": 4585000
+    },
+    "latency": {
+      "httpMs": {
+        "n": 21,
+        "p50": 2,
+        "p95": 5,
+        "p99": 10,
+        "max": 5.2218
+      },
+      "broadcastMs": {
+        "n": 5,
+        "p50": 300,
+        "p95": 1000,
+        "p99": 1000,
+        "max": 538
+      },
+      "publishMs": {
+        "n": 5,
+        "p50": 1,
+        "p95": 5,
+        "p99": 5,
+        "max": 3
+      },
+      "storeMs": {
+        "n": 9,
+        "p50": 1,
+        "p95": 1,
+        "p99": 1,
+        "max": 0.4658
+      }
+    }
+  },
+  "client": {
+    "generatorRssMB": 216,
+    "unexpectedCloses": 0,
+    "errors": 0
+  },
+  "finishedAt": "2026-10-09T18:48:55.910Z"
+}
