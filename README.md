@@ -1,4 +1,4 @@
-# Destello·Sync V3.3.0
+# Destello·Sync V3.4.0
 
 Sincroniza las pantallas de los teléfonos de un público: cada persona abre una web (sin instalar nada) escaneando un QR y un operador controla colores y
 efectos en tiempo real desde `/master`. WebSocket real (`ws`), estado autoritativo en el servidor, ejecución programada (`executeAt`) con reloj sincronizado,
@@ -33,16 +33,18 @@ Producción: `NODE_ENV=production MASTER_PASSWORD=<≥12 caracteres> npm start`.
 ## Pruebas
 
 ```bash
-npm test                  # 151 pruebas (con Redis real; 19 se omiten sin REDIS_SERVER): navegación, efectos, plataforma/PWA, rastreador de ACK, funcionales, seguridad, WebSocket, compatibilidad, idempotencia, robustez, auditoría, distribución, generador de carga
+npm test                  # 159 pruebas (con Redis real; 20 se omiten sin REDIS_SERVER): navegación, efectos, plataforma/PWA, rastreador de ACK, funcionales, seguridad, WebSocket, compatibilidad, idempotencia, robustez, auditoría, distribución, generador de carga
 REDIS_SERVER=/ruta/a/redis-server npm test    # incluye distribución con 2 instancias + Redis REAL (si no, esas 6 se omiten y se informa)
 npm run check             # sintaxis de todo el JavaScript
-npm run test:browser      # 36 E2E en Chrome/Edge real (incluye portada → panel → QR → participante y el interruptor Flash), con la cobertura de pantalla con emulación móvil (puppeteer-core; CHROME_PATH opcional)
+npm run test:browser      # 39 E2E en Chrome/Edge real (incluye portada → panel → QR → participante y el interruptor Flash), con la cobertura de pantalla con emulación móvil (puppeteer-core; CHROME_PATH opcional)
 node tools/loadtest.js --spawn --clients 1000 --commands 5 --storm 1   # prueba de carga (ver docs/CARGA.md)
 ```
 
 ## Documentación
 
 * `docs/RUTAS.md` — todas las rutas HTTP/WS: método, autenticación, respuestas y errores.
+* `docs/SINCRONIZACION.md` — qué pasa cuando miles de teléfonos escanean en momentos distintos, fuentes de error, mediciones y operación en estadio.
+* `docs/INFORME_V3.4.0.md` — sincronía: reloj compensado al unirse, dibujo exacto, reloj único entre instancias y telemetría.
 * `docs/INFORME_V3.3.0.md` — efecto «Secuencia de colores» (2–12 colores, segundos por color, ininterrumpida hasta DETENER TODO).
 * `docs/INFORME_V3.2.2.md` — colores atenuados en Samsung: Wake Lock con reintentos y diagnóstico de color.
 * `docs/INFORME_V3.2.1.md` — ciclo de vida finito de las órdenes, causas por efecto, pruebas y despliegue de ensayo.

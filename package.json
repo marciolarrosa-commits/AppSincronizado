@@ -1,17 +1,18 @@
 {
   "name": "destello-sync-v3",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "private": true,
   "description": "Control sincronizado de pantallas de celulares para eventos masivos (WebSocket, estado autoritativo, Redis opcional)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test --test-concurrency=1 test/effects.test.js test/plataforma.test.js test/navegacion.test.js test/ordenes.test.js test/ordenes-servidor.test.js test/secuencia.test.js test/pending.test.js test/funcional.test.js test/seguridad.test.js test/websocket.test.js test/compat.test.js test/idempotencia.test.js test/robustez.test.js test/auditoria.test.js test/distribucion.test.js test/loadtest.test.js",
+    "test": "node --test --test-concurrency=1 test/effects.test.js test/plataforma.test.js test/navegacion.test.js test/ordenes.test.js test/ordenes-servidor.test.js test/secuencia.test.js test/reloj.test.js test/pending.test.js test/funcional.test.js test/seguridad.test.js test/websocket.test.js test/compat.test.js test/idempotencia.test.js test/robustez.test.js test/auditoria.test.js test/distribucion.test.js test/loadtest.test.js",
     "test:redis": "node --test --test-concurrency=1 test/distribucion.test.js",
     "load": "node tools/loadtest.js",
-    "test:browser": "node --test --test-concurrency=1 e2e/navegacion.test.js e2e/browser.test.js e2e/master-ack.test.js e2e/ordenes.test.js e2e/pantalla.test.js e2e/secuencia.test.js e2e/red-movil.test.js e2e/cobertura.test.js",
-    "check": "node scripts/check-syntax.js"
+    "test:browser": "node --test --test-concurrency=1 e2e/navegacion.test.js e2e/browser.test.js e2e/master-ack.test.js e2e/ordenes.test.js e2e/pantalla.test.js e2e/secuencia.test.js e2e/sincronia.test.js e2e/red-movil.test.js e2e/cobertura.test.js",
+    "check": "node scripts/check-syntax.js",
+    "sync:bench": "node tools/sincronia.js"
   },
   "engines": {
     "node": ">=20 <26"
