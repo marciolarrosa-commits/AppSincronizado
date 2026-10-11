@@ -140,3 +140,23 @@ Medición de CPU del hilo principal (Chrome de escritorio headless; **no** es un
 * iOS suspende WebSockets y animaciones con la pantalla bloqueada o la pestaña en segundo plano; Wake Lock no está garantizado.
 * Uniformidad fotométrica entre teléfonos: **no garantizable** (§7).
 * El panel de diagnóstico se abre con 5 toques: un asistente puede abrirlo sin querer (se cierra a los 10 s; no afecta a la superficie salvo mientras está abierto).
+
+
+## Colores atenuados en Samsung: blanco → gris, amarillo → marrón (V3.2.2)
+
+**Qué se sabe (verificado):** la página pide y pinta el color exacto (`intensity` = 1; las pruebas con Chrome miden el 100 % de los píxeles con el color pedido). «Blanco que se ve gris» y «amarillo que se ve marrón» son el **mismo tono con menos luminancia**: no es un cambio de color sino una pantalla más oscura. Sobre un Samsung S24 Ultra / S26 reales **no se pudo reproducir ni medir desde aquí**: lo que sigue son causas probables que el diagnóstico permite distinguir.
+
+| # | Causa probable | Cómo se reconoce en el diagnóstico (5 toques en la pantalla) | Qué hacer |
+|---|---|---|---|
+| 1 | **Android atenúa la pantalla por inactividad** (antes de apagarla) porque la web no logró mantenerla encendida (Wake Lock rechazado o liberado) | `Pantalla encendida (Wake Lock): DENEGADA (…)`, `NO disponible…` o `liberada…` | 3.2.2 reintenta el Wake Lock (1 s, 2 s, 4 s… hasta 30 s), lo vuelve a pedir si el sistema lo libera y lo reintenta con cada toque. En el teléfono: desactivar el ahorro de energía y abrir en Chrome. |
+| 2 | **Brillo bajo o «Brillo adaptable»** (la web no puede subir el brillo del sistema) | `Wake Lock: activa` y `calculado = pintado = el color pedido`, pero la pantalla se ve oscura | Brillo al máximo y desactivar «Brillo adaptable» antes del espectáculo. |
+| 3 | **Protección ocular / filtro de luz azul** («Eye comfort shield») | Igual que 2 (el filtro es del sistema); suele teñir cálido (blanco amarillento) | Desactivarlo. |
+| 4 | **Modo oscuro de sitios web** del navegador (Samsung Internet / Chrome «Auto Dark Mode») | `COLORES FORZADOS` o `tema oscuro`, o `calculado` distinto de `pintado` | Desactivar el modo oscuro para webs en el navegador. |
+| 5 | **Ahorro de energía** (limita brillo y puede negar el Wake Lock) | Wake Lock `DENEGADA` | Desactivarlo durante el evento. |
+| 6 | **Transición en curso** (Fijo con `fadeMs` 500 parte del color anterior; desde negro, el blanco pasa por gris) | Se resuelve sola en 0,5 s; si persiste, no es esta causa | — |
+
+**Cómo leer la línea de color:** `Color: calculado rgb(255, 255, 255) · pintado rgb(255, 255, 255)`. Si ambos son el color pedido y aun así se ve gris, la causa está fuera de la página (teléfono/navegador). Si `calculado` o `pintado` no coinciden con lo pedido, es un defecto de la app: enviar una captura del diagnóstico. Para verlo sin esperar una orden, abrir el enlace con `&debug=1` (aparece en la pantalla de incorporación).
+
+**Texto para el público (junto al QR):** «Subí el brillo al máximo, desactivá el ahorro de energía y la protección ocular, y abrí el enlace en Chrome. Dejá la pantalla encendida y la pestaña en primer plano.»
+
+**Límite que una web no puede resolver:** una página no puede forzar el brillo máximo del sistema ni impedir toda atenuación; una aplicación nativa sí. Si el ensayo físico confirma que es la causa dominante, la alternativa es una app instalable (hoy no existe y la instalación sería un paso extra para 20 000 personas).

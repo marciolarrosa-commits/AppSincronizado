@@ -31,7 +31,7 @@
     lastVersion: -1, current: null, pending: null, from: null, shown: [0, 0, 0], appliedMeta: null,
     clock: { offset: 0, bestRtt: Infinity, samples: [], synced: false },
     config: { clockPingIntervalMs: 30000, heartbeatMs: 20000 }, incarnation: undefined, animating: false, discTimers: [], connected: false, disconnectedAt: 0, lastPongAt: 0, pingTimer: null, watchdog: null,
-    effectsOff: false, reduced: false, raf: 0, wakeLock: null, hintDelay: null, lastRtt: null, stats: { applied: 0, ignored: 0, lateArrivals: 0 },
+    effectsOff: false, reduced: false, raf: 0, wakeLock: null, wake: { state: 'idle', error: null, tries: 0, pending: false, timer: null, grants: 0 }, hintDelay: null, lastRtt: null, stats: { applied: 0, ignored: 0, lateArrivals: 0 },
     mode: 'preshow', panelOpen: false, panelTimer: null, taps: [], autoShow: !/[?&]show=0/.test(location.search), bannerText: null, lastCss: null, chromeCss: null, chromeAt: 0,
     env: null, fs: { api: 'none', requested: false, state: 'none', reason: null, lastTry: 0 }, viewport: { w: 0, h: 0, dpr: 1 }
   };
@@ -106,6 +106,12 @@
     if (el.advice && S.env) el.advice.textContent = PLAT.advice(S.env, S.fs.api).text;
     paintDiag(); updateBanner();
   }
+  function colorLine() {
+    var env = colorEnv(); var painted = '?';
+    try { if (el.light) painted = getComputedStyle(el.light).backgroundColor; } catch (e) { /* sin estilo */ }
+    var calc = 'rgb(' + Math.round(S.shown[0]) + ', ' + Math.round(S.shown[1]) + ', ' + Math.round(S.shown[2]) + ')';
+    return 'Color: calculado ' + calc + ' · pintado ' + painted + ' · tema ' + (env.dark ? 'oscuro' : 'claro') + (env.forced ? ' · COLORES FORZADOS' : '') + ' · gama ' + env.gamut + (env.hdr ? ' · HDR' : '') + ' · ' + env.depth + ' bits';
+  }
   function paintDiag() {
     if (!el.diag) return;
     // Diagnóstico: SOLO con el panel abierto (o en la pantalla de incorporación si el enlace lleva debug=1). En modo espectáculo nunca queda encima del color.
@@ -115,7 +121,8 @@
     var fsText = S.fs.api === 'none' ? 'no disponible en este navegador' : (PLAT.isFullscreen(document) ? 'activa' : (S.fs.state === 'rejected' ? 'rechazada (' + S.fs.reason + ')' : (S.fs.requested ? 'solicitada' : 'sin solicitar')));
     el.diag.textContent = ['Sesión ' + (S.code || '—') + ' · versión ' + S.lastVersion + ' · ' + (S.connected ? 'conectado' : 'sin conexión'),
       'Pantalla ' + S.viewport.w + '×' + S.viewport.h + ' CSS px · ×' + S.viewport.dpr + ' · ' + (S.env ? S.env.displayMode : '?'),
-      'Pantalla completa: ' + fsText, 'Reloj: desfase ' + Math.round(S.clock.offset) + ' ms · RTT ' + (S.lastRtt == null ? '—' : Math.round(S.lastRtt)) + ' ms'].join('\n');
+      'Pantalla completa: ' + fsText, 'Pantalla encendida (Wake Lock): ' + wakeText(),
+      colorLine(), 'Reloj: desfase ' + Math.round(S.clock.offset) + ' ms · RTT ' + (S.lastRtt == null ? '—' : Math.round(S.lastRtt)) + ' ms'].join('\n');
   }
   function measureViewport() {
     S.viewport = { w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio || 1 };
@@ -167,6 +174,7 @@
   function leave() {
     S.closedByUser = true; clearTimeout(S.reconnectTimer); clearTimeout(S.pingTimer); clearInterval(S.watchdog); clearDisconnectTimers(); clearTimeout(S.panelTimer);
     if (S.ws) { try { S.ws.onclose = null; S.ws.close(1000); } catch (e) { /* ya cerrado */ } S.ws = null; }
+    clearTimeout(S.wake.timer);
     try { if (S.wakeLock) S.wakeLock.release(); } catch (e) { /* ignorado */ }
     PLAT.exitFullscreen(document);
     S.connected = false; S.mode = 'preshow'; S.panelOpen = false;
@@ -264,7 +272,7 @@
     }
     if (DEBUG && el.debug && !el.debug.hidden) {
       el.debug.textContent = 'v' + S.lastVersion + ' off=' + Math.round(S.clock.offset) + 'ms rtt=' + (S.lastRtt == null ? '-' : Math.round(S.lastRtt)) +
-        ' dev=' + (S.appliedMeta ? Math.round(S.appliedMeta.deviation) : '-') + ' ign=' + S.stats.ignored + ' raf=' + (animated || S.pending ? 'on' : 'off');
+        ' dev=' + (S.appliedMeta ? Math.round(S.appliedMeta.deviation) : '-') + ' ign=' + S.stats.ignored + ' wake=' + S.wake.state + ' raf=' + (animated || S.pending ? 'on' : 'off');
     }
     if (S.pending || flashing) ensureLoop();                         // órdenes pendientes y strobe: a 60 fps para respetar su temporización
     else if (animated) setTimeout(ensureLoop, 22);                   // pulso/transición: ~30 fps (menos CPU y batería)
@@ -391,11 +399,47 @@
     else if (S.connected) clockBurst();
   }
   function onOnline() { if (!S.connected && !connecting() && !S.closedByUser && !S.fatal) { clearTimeout(S.reconnectTimer); S.reconnectTimer = setTimeout(function () { S.reconnectTimer = null; connect(); }, Math.random() * 1000); } }
+  // Mantener la pantalla encendida: sin esto Android ATENÚA la pantalla antes de apagarla (blanco -> gris, amarillo -> marrón) aunque la página pinte el
+  // color exacto. Antes se pedía UNA vez y un rechazo se ignoraba en silencio. Ahora: si falla se reintenta con espera creciente (1 s, 2 s, 4 s … máx. 30 s),
+  // si el sistema lo libera se vuelve a pedir, y el estado (y el error) se muestra en el panel de diagnóstico.
+  function scheduleWakeRetry(ms) {
+    clearTimeout(S.wake.timer);
+    if (S.closedByUser) return;
+    S.wake.timer = setTimeout(function () { S.wake.timer = null; requestWakeLock(); }, ms);
+  }
   function requestWakeLock() {
+    var W = S.wake;
     try {
-      if (!('wakeLock' in navigator) || S.wakeLock) return;
-      navigator.wakeLock.request('screen').then(function (l) { S.wakeLock = l; l.addEventListener('release', function () { S.wakeLock = null; }); }).catch(function () { /* no permitido */ });
-    } catch (e) { /* sin Wake Lock */ }
+      if (!('wakeLock' in navigator) || !navigator.wakeLock) { W.state = 'unsupported'; paintDiag(); return; }
+      if (S.wakeLock || W.pending || document.hidden || S.closedByUser) return;       // oculta: se reintenta al volver (onVisible)
+      W.pending = true;
+      navigator.wakeLock.request('screen').then(function (l) {
+        S.wakeLock = l; W.state = 'active'; W.error = null; W.tries = 0; W.grants++;
+        l.addEventListener('release', function () {
+          S.wakeLock = null; W.state = 'released'; paintDiag();
+          if (!document.hidden) scheduleWakeRetry(500);                               // el sistema lo liberó estando visible: se vuelve a pedir
+        });
+      }).catch(function (e) {
+        W.state = 'denied'; W.error = (e && e.name) || 'error';
+        scheduleWakeRetry(Math.min(30000, 1000 * Math.pow(2, W.tries++)));
+      }).then(function () { W.pending = false; paintDiag(); });
+    } catch (e) { W.state = 'denied'; W.error = (e && e.name) || 'error'; W.pending = false; scheduleWakeRetry(Math.min(30000, 1000 * Math.pow(2, W.tries++))); }
+  }
+  // Datos de entorno que explican por qué un teléfono muestra otro color o atenúa (se leen del navegador, no se suponen).
+  function colorEnv() {
+    function mm(q) { try { return window.matchMedia(q).matches; } catch (e) { return false; } }
+    return {
+      dark: mm('(prefers-color-scheme: dark)'), forced: mm('(forced-colors: active)'), hdr: mm('(dynamic-range: high)'),
+      gamut: mm('(color-gamut: rec2020)') ? 'rec2020' : (mm('(color-gamut: p3)') ? 'p3' : 'srgb'), depth: (window.screen && screen.colorDepth) || '?'
+    };
+  }
+  function wakeText() {
+    var W = S.wake;
+    if (W.state === 'active') return 'activa (pantalla encendida)';
+    if (W.state === 'unsupported') return 'NO disponible en este navegador: la pantalla puede atenuarse y apagarse sola';
+    if (W.state === 'denied') return 'DENEGADA (' + W.error + '): la pantalla puede atenuarse · reintento ' + W.tries;
+    if (W.state === 'released') return 'liberada por el sistema: se vuelve a pedir';
+    return 'solicitando…';
   }
 
   function submitCode(ev) {
@@ -445,6 +489,8 @@
     window.addEventListener('beforeunload', function () { S.closedByUser = true; try { S.ws && S.ws.close(1000); } catch (e) { /* ya cerrado */ } });
     renderUi();
     if (S.code) { startWatchdog(); connect(); }          // sin código (aplicación instalada): se muestra el formulario para ingresarlo
+    document.addEventListener('pointerdown', function () { if (!S.wakeLock) requestWakeLock(); }, { passive: true });
+    setInterval(function () { if (S.panelOpen) paintDiag(); }, 1000);
     requestWakeLock(); ensureLoop();
   }
 
