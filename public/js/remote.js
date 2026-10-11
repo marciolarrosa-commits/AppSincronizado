@@ -265,7 +265,7 @@
     var animated = false; var flashing = false;
     if (S.current && el.stage) {
       var r;
-      try { r = FX.evaluate(S.current, now, { from: S.from, reduced: calm, stale: stale }); }
+      try { r = FX.evaluate(S.current, now, { from: S.from, reduced: calm, stale: stale, manualOff: S.effectsOff, systemReduced: S.reduced }); }
       catch (e) { r = { rgb: [0, 0, 0], animated: false, flashing: false }; S.stats.evalErrors = (S.stats.evalErrors || 0) + 1; }   // ante cualquier fallo: estado seguro (apagado), nunca un bucle roto
       S.shown = r.rgb; animated = r.animated; flashing = r.flashing; S.animating = animated;
       paintLight(r.rgb, animated);

@@ -195,3 +195,25 @@ test('Redis: los cuatro efectos con la carga útil EXACTA del panel (solid, fade
   const st = await phone.waitFor(m => m.type === 'state' && m.commandId === 'redis-fx-strobe-on', 4000);
   assert.equal(st.payload.effect, 'strobe'); assert.equal(st.payload.hz, 2); assert.equal(st.payload.duty, 0.25); assert.equal(st.payload.durationMs, 10000);
 });
+
+test('Redis: la SECUENCIA de colores se acepta en A y llega íntegra (pasos, tiempos, transición) a un teléfono de B; el reenvío del mismo commandId no la duplica', { skip, timeout: 60000 }, async t => {
+  const rport = await freePort(); const redis = await startRedis(rport); t.after(() => redis.kill());
+  const url = `redis://127.0.0.1:${rport}`;
+  const A = await startServer({ redisUrl: url, instanceId: 'A', redisPrefix: 'tq:' }); t.after(A.stop);
+  const B = await startServer({ redisUrl: url, instanceId: 'B', redisPrefix: 'tq:' }); t.after(B.stop);
+  const op = await login(A.base); const s = await createSession(A.base, op);
+  const master = await joinMaster(A.wsUrl, s.sessionId, s.masterToken);
+  const phone = await joinPublic(B.wsUrl, s.sessionId, dev(1));
+  const steps = [{ color: '#75AADB', holdMs: 3000 }, { color: '#FFFFFF', holdMs: 3000 }, { color: '#FF0000', holdMs: 1500 }];
+  const msg = { protocolVersion: 1, type: 'command', commandId: 'redis-seq-0001', leadMs: 300, payload: { effect: 'sequence', steps, fadeMs: 500, durationMs: 0 } };
+  master.send(msg);
+  const ack = await master.waitFor(m => m.type === 'ack' && m.commandId === 'redis-seq-0001', 4000);
+  const st = await phone.waitFor(m => m.type === 'state' && m.commandId === 'redis-seq-0001', 4000);
+  assert.equal(st.stateVersion, ack.stateVersion); assert.deepEqual(st.payload.steps, steps); assert.equal(st.payload.fadeMs, 500); assert.equal(st.payload.durationMs, 0);
+  master.send(msg);
+  assert.equal((await master.waitFor(m => m.type === 'ack' && m.commandId === 'redis-seq-0001', 4000)).duplicate, true);
+  await sleep(300); assert.equal(phone.msgs.filter(x => x.type === 'state').length, 0, 'el duplicado no se volvió a publicar');
+  // un teléfono que se une DESPUÉS recibe la secuencia vigente en la bienvenida (recuperación del estado)
+  const late = await joinPublic(B.wsUrl, s.sessionId, dev(2));
+  assert.deepEqual(late.welcome.state.payload.steps, steps);
+});

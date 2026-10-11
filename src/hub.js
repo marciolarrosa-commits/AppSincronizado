@@ -410,6 +410,12 @@ function createHub({ config, store, metrics, logger, auth, getHealth }) {
         if (!conn.cmdLimiter.take()) { metrics.inc('rate_limited_commands'); throw new P.ProtocolError('RATE_LIMITED', 'Demasiadas órdenes por segundo'); }
         cmd = P.validateCommand(msg, limits);
         if (cmd.payload.effect === 'strobe' && !(sess.strobeEnabled && config.strobeAllowed)) throw new P.ProtocolError('STROBE_DISABLED', 'El strobe está deshabilitado: habilitalo en el panel confirmando la advertencia');
+        if (cmd.payload.effect === 'sequence') {
+          // Un paso de menos de 1 s equivale a un parpadeo (hasta 2 Hz): se trata como strobe (habilitación explícita con la advertencia) y nunca supera la frecuencia máxima.
+          const minHold = Math.min(...cmd.payload.steps.map(st => st.holdMs));
+          if (1000 / minHold > config.maxStrobeHz) throw new P.ProtocolError('OUT_OF_RANGE', 'Los cambios de color son demasiado rápidos (máx. ' + config.maxStrobeHz + ' por segundo)');
+          if (minHold < 1000 && !(sess.strobeEnabled && config.strobeAllowed)) throw new P.ProtocolError('STROBE_DISABLED', 'Un paso de la secuencia dura menos de 1 s: se considera intermitente y exige habilitar el strobe con la advertencia de fotosensibilidad');
+        }
         commandId = cmd.commandId || 'c' + rid(8);
         payload = cmd.payload;
         executeAt = ts + effectiveLead(cmd.leadMs);

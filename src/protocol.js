@@ -7,7 +7,8 @@ const SESSION_RE = /^[A-HJ-NP-Z2-9]{6}$/;           // alfabeto sin 0/O/1/I/L (Q
 const DEVICE_RE = /^[A-Za-z0-9_-]{8,80}$/;
 const COMMAND_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
-const EFFECTS = ['off', 'solid', 'fade', 'pulse', 'strobe'];
+const EFFECTS = ['off', 'solid', 'fade', 'pulse', 'strobe', 'sequence'];
+const SEQ_MIN_STEPS = 2, SEQ_MAX_STEPS = 12, SEQ_MIN_HOLD_MS = 500, SEQ_MAX_HOLD_MS = 600000;   // secuencia de colores: 2–12 pasos de 0,5 s a 10 min
 
 const CLIENT_TYPES = new Set(['hello', 'ping', 'applied', 'command', 'stop', 'setConfig']);
 
@@ -100,7 +101,7 @@ function validateApplied(msg) {
 }
 
 const COMMAND_FIELDS = ['protocolVersion', 'type', 'commandId', 'leadMs', 'payload'];
-const PAYLOAD_FIELDS = ['effect', 'color', 'color2', 'intensity', 'periodMs', 'hz', 'duty', 'fadeMs', 'durationMs'];
+const PAYLOAD_FIELDS = ['effect', 'color', 'color2', 'intensity', 'periodMs', 'hz', 'duty', 'fadeMs', 'durationMs', 'steps'];
 
 /**
  * Valida una orden visual del Master y devuelve un payload normalizado y completo (con valores por defecto).
@@ -119,7 +120,7 @@ function validateCommand(msg, limits) {
   onlyKeys(p, PAYLOAD_FIELDS, 'payload');
   if (typeof p.effect !== 'string' || !EFFECTS.includes(p.effect)) throw new ProtocolError('INVALID_EFFECT', `effect debe ser uno de: ${EFFECTS.join(', ')}`);
   const payload = { effect: p.effect, color: '#000000', color2: '#000000', intensity: 1 };
-  if (p.effect !== 'off') {
+  if (p.effect !== 'off' && p.effect !== 'sequence') {        // la secuencia define sus colores en `steps` (payload.color se deriva del primero)
     if (typeof p.color !== 'string' || !COLOR_RE.test(p.color)) throw new ProtocolError('INVALID_COLOR', 'color debe tener formato #RRGGBB');
     payload.color = p.color.toUpperCase();
   }
@@ -133,6 +134,20 @@ function validateCommand(msg, limits) {
   }
   if (p.effect === 'pulse') {
     payload.periodMs = p.periodMs === undefined ? 2000 : numberIn(p.periodMs, 600, 10000, 'periodMs', { integer: true });
+    payload.durationMs = p.durationMs === undefined ? 0 : numberIn(p.durationMs, 0, limits.maxPulseDurationMs, 'durationMs', { integer: true });
+  }
+  if (p.effect === 'sequence') {
+    // Secuencia de colores: cada paso muestra su color `holdMs` y al terminar pasa al siguiente; tras el último vuelve al primero (sin fin si durationMs = 0).
+    if (!Array.isArray(p.steps) || p.steps.length < SEQ_MIN_STEPS || p.steps.length > SEQ_MAX_STEPS) throw new ProtocolError('INVALID_FIELD', `steps debe tener entre ${SEQ_MIN_STEPS} y ${SEQ_MAX_STEPS} colores`);
+    payload.steps = p.steps.map((st, i) => {
+      if (!isPlainObject(st)) throw new ProtocolError('INVALID_FIELD', `steps[${i}] debe ser un objeto`);
+      onlyKeys(st, ['color', 'holdMs'], `steps[${i}]`);
+      if (typeof st.color !== 'string' || !COLOR_RE.test(st.color)) throw new ProtocolError('INVALID_COLOR', `steps[${i}].color debe tener formato #RRGGBB`);
+      return { color: st.color.toUpperCase(), holdMs: numberIn(st.holdMs, SEQ_MIN_HOLD_MS, SEQ_MAX_HOLD_MS, `steps[${i}].holdMs`, { integer: true }) };
+    });
+    payload.color = payload.steps[0].color;
+    const minHold = Math.min(...payload.steps.map(st => st.holdMs));
+    payload.fadeMs = p.fadeMs === undefined ? 0 : numberIn(p.fadeMs, 0, Math.min(10000, minHold), 'fadeMs', { integer: true });   // la transición cabe dentro del paso más corto
     payload.durationMs = p.durationMs === undefined ? 0 : numberIn(p.durationMs, 0, limits.maxPulseDurationMs, 'durationMs', { integer: true });
   }
   if (p.effect === 'strobe') {
@@ -178,5 +193,5 @@ const server = {
 
 module.exports = {
   PROTOCOL_VERSION, SESSION_RE, DEVICE_RE, COMMAND_ID_RE, COLOR_RE, EFFECTS,
-  ProtocolError, safeCommandId, peekControl, parseEnvelope, validateHello, validatePing, validateApplied, validateCommand, validateStop, validateSetConfig, server
+  SEQ_MIN_STEPS, SEQ_MAX_STEPS, SEQ_MIN_HOLD_MS, SEQ_MAX_HOLD_MS, ProtocolError, safeCommandId, peekControl, parseEnvelope, validateHello, validatePing, validateApplied, validateCommand, validateStop, validateSetConfig, server
 };

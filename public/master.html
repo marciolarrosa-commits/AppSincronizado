@@ -48,6 +48,13 @@ label{font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:4
 .risk{background:#2a1810;border:1px solid #6b3a1d;border-radius:12px;padding:12px 14px;font-size:13px;color:#ffd6b0}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px}
 .kv b{color:var(--muted);font-weight:500}
+.seq-list{list-style:none;margin:10px 0;padding:0;display:grid;gap:8px}
+.seq-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:8px 10px;cursor:pointer}
+.seq-row.sel{outline:2px solid var(--accent)}
+.seq-row .nm{min-width:92px;font-size:13px;color:var(--muted)}
+.seq-row input[type=color]{width:52px;height:38px;padding:0;background:transparent;border:0;cursor:pointer}
+.seq-row input[type=number]{width:84px}
+.seq-row .del{margin-left:auto;padding:8px 12px}
 .st-ok{color:var(--ok)}.st-bad{color:var(--danger)}.st-warn{color:var(--warn)}.st-pending{color:var(--fg)}.st-muted{color:var(--muted)}
 ul.sessions{list-style:none;margin:10px 0 0;padding:0}
 ul.sessions li{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-family:ui-monospace,monospace}
@@ -114,6 +121,7 @@ ul.sessions li{display:flex;justify-content:space-between;align-items:center;pad
           <button class="btn" data-effect="fade" type="button">Transición</button>
           <button class="btn" data-effect="pulse" type="button">Pulso</button>
           <button class="btn" data-effect="strobe" type="button">Strobe</button>
+          <button class="btn" data-effect="sequence" type="button">Secuencia</button>
         </div>
         <div class="params">
           <label id="pFade" class="">Duración de transición (ms)<input id="fadeMs" type="number" min="0" max="10000" step="100" value="500"></label>
@@ -124,6 +132,16 @@ ul.sessions li{display:flex;justify-content:space-between;align-items:center;pad
           <label>Margen de sincronización
             <select id="lead"><option value="800">Rápido (0,8 s)</option><option value="1500" selected>Normal (1,5 s)</option><option value="3000">Seguro (3 s)</option></select>
           </label>
+        </div>
+        <!-- Secuencia de colores: color inicial + los que se agreguen con «＋»; cada uno dura los segundos indicados y al terminar vuelve al primero -->
+        <div id="pSeq" class="hidden" style="margin-top:14px">
+          <p class="muted small" style="margin:0 0 6px">Cada color se muestra los segundos que indiques; al llegar al último vuelve al primero y <strong>se repite sin parar hasta que pulses DETENER TODO</strong> (o hasta la duración total que fijes). Para asignar un color, tocá una fila y elegí uno de la paleta de arriba o del selector de la fila.</p>
+          <ol id="seqList" class="seq-list" aria-label="Colores de la secuencia"></ol>
+          <div class="row"><button id="seqAdd" class="btn" type="button">＋ Agregar color</button><span id="seqSummary" class="muted small" aria-live="polite"></span></div>
+          <div class="params">
+            <label>Transición entre colores (ms; 0 = corte seco)<input id="seqFadeMs" type="number" min="0" max="10000" step="100" value="0"></label>
+            <label>Duración total (s; 0 = hasta DETENER TODO)<input id="seqDurationS" type="number" min="0" max="600" step="1" value="0"></label>
+          </div>
         </div>
         <div class="row" style="margin-top:16px"><button id="send" class="btn primary" type="button" disabled>Aplicar a todos</button></div>
 

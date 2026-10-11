@@ -226,7 +226,7 @@
   // ---------------------------------------------------------------- indicadores de la última orden (derivados del registro real de S.orders)
   var LEVEL_CLASS = { ok: 'st-ok', bad: 'st-bad', warn: 'st-warn', pending: 'st-pending', muted: 'st-muted' };
   function setStatus(id, d) { var n = $(id); n.textContent = d.text; n.className = LEVEL_CLASS[d.level] || ''; }
-  var EFFECT_LABEL = { solid: 'Fijo', fade: 'Transición', pulse: 'Pulso', strobe: 'Strobe', off: 'Detener' };
+  var EFFECT_LABEL = { solid: 'Fijo', fade: 'Transición', pulse: 'Pulso', strobe: 'Strobe', sequence: 'Secuencia', off: 'Detener' };
   function renderOrder() {
     var cur = S.orders.current();
     if (!cur) { setStatus('kAccepted', { text: '—', level: 'muted' }); setStatus('kApplied', { text: '—', level: 'muted' }); return; }
@@ -268,7 +268,7 @@
     else alertBox('', null, 'health');
   }
   function paintStrobe() {
-    show('strobeBox', S.effect === 'strobe' || S.strobeEnabled);
+    show('strobeBox', S.effect === 'strobe' || S.strobeEnabled || (S.effect === 'sequence' && seqMinHoldMs() < 1000));
     $('strobeState').textContent = S.strobeEnabled ? 'Strobe HABILITADO en esta sesión (máx ' + S.maxHz + ' Hz, duración limitada).' : 'Strobe deshabilitado (valor seguro por defecto).';
     show('strobeEnable', !S.strobeEnabled); show('strobeDisable', S.strobeEnabled);
   }
@@ -277,14 +277,56 @@
   // Los límites del panel deben coincidir con los del servidor (protocolo v1): periodo 600–10000 ms, transición 0–10000 ms, pulso hasta 600 s y strobe
   // hasta maxStrobeDurationMs (30 s por defecto; llega en el welcome). Un valor fuera de rango se AJUSTA y se avisa, en vez de enviarse para ser rechazado.
   function durationMaxS() { return S.effect === 'strobe' ? Math.max(1, Math.floor(S.maxStrobeMs / 1000)) : 600; }
-  function paintDurationLimit() { var el = $('durationS'); el.max = String(durationMaxS()); if (Number(el.value) > durationMaxS()) el.value = String(durationMaxS()); }
+  function paintDurationLimit() {
+    var el = $('durationS'); el.max = String(durationMaxS());
+    // En Pulso 0 significa «sin límite»; el strobe SIEMPRE tiene duración (mín. 0,5 s): al pasar a Strobe un 0 heredado de Pulso se cambia por 10 s (valor por defecto).
+    if (S.effect === 'strobe' && !(Number(el.value) > 0)) el.value = '10';
+    if (Number(el.value) > durationMaxS()) el.value = String(durationMaxS());
+  }
+  // ---------------------------------------------------------------- Secuencia de colores (lista editable: color + segundos; botón «＋» para agregar)
+  var SEQ_MIN = 2, SEQ_MAX = 12;
+  S.steps = [{ color: '#FFD400', sec: 3 }, { color: '#0A84FF', sec: 3 }]; S.seqSel = 0;
+  function seqMinHoldMs() { return Math.min.apply(null, S.steps.map(function (s) { return Math.round((Number(s.sec) || 0) * 1000); })); }
+  function seqSummary() {
+    var total = S.steps.reduce(function (a, s) { return a + (Number(s.sec) || 0); }, 0);
+    var txt = S.steps.length + ' colores · ciclo de ' + (Math.round(total * 10) / 10) + ' s · se repite hasta DETENER TODO';
+    if (seqMinHoldMs() < 1000) txt += ' · ⚠ un paso dura menos de 1 s: se considera intermitente y exige habilitar el strobe';
+    $('seqSummary').textContent = txt; paintStrobe();
+  }
+  function renderSeq() {
+    var ol = $('seqList'); ol.textContent = '';
+    S.steps.forEach(function (st, i) {
+      var li = document.createElement('li'); li.className = 'seq-row' + (i === S.seqSel ? ' sel' : '');
+      li.addEventListener('click', function () { S.seqSel = i; Array.prototype.forEach.call(ol.children, function (c, k) { c.classList.toggle('sel', k === i); }); });
+      var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = i === 0 ? 'Color inicial' : 'Color ' + (i + 1);
+      var c = document.createElement('input'); c.type = 'color'; c.value = st.color.toLowerCase(); c.setAttribute('aria-label', nm.textContent);
+      c.addEventListener('input', function () { st.color = c.value.toUpperCase(); });
+      var sec = document.createElement('input'); sec.type = 'number'; sec.min = '0.5'; sec.max = '600'; sec.step = '0.5'; sec.value = String(st.sec); sec.setAttribute('aria-label', 'Segundos del ' + nm.textContent.toLowerCase());
+      sec.addEventListener('input', function () { st.sec = Number(sec.value); seqSummary(); });
+      var unit = document.createElement('span'); unit.className = 'muted small'; unit.textContent = 's';
+      var del = document.createElement('button'); del.type = 'button'; del.className = 'btn del'; del.textContent = '✕'; del.title = 'Quitar este color'; del.setAttribute('aria-label', 'Quitar ' + nm.textContent.toLowerCase());
+      del.disabled = S.steps.length <= SEQ_MIN;
+      del.addEventListener('click', function (ev) { ev.stopPropagation(); if (S.steps.length <= SEQ_MIN) return; S.steps.splice(i, 1); S.seqSel = Math.min(S.seqSel, S.steps.length - 1); renderSeq(); });
+      li.appendChild(nm); li.appendChild(c); li.appendChild(sec); li.appendChild(unit); li.appendChild(del); ol.appendChild(li);
+    });
+    $('seqAdd').disabled = S.steps.length >= SEQ_MAX;
+    seqSummary();
+  }
+  $('seqAdd').addEventListener('click', function () {
+    if (S.steps.length >= SEQ_MAX) return;
+    var last = S.steps[S.steps.length - 1];
+    S.steps.push({ color: PALETTE[(S.steps.length * 3) % PALETTE.length], sec: last ? last.sec : 3 }); S.seqSel = S.steps.length - 1; renderSeq();
+  });
+
   function setEffect(e) {
     S.effect = e;
+    show('pSeq', e === 'sequence');
     document.querySelectorAll('[data-effect]').forEach(function (b) { b.classList.toggle('primary', b.getAttribute('data-effect') === e); });
     show('pFade', e === 'solid' || e === 'fade'); show('pColor2', e === 'fade' || e === 'pulse' || e === 'strobe');
     show('pPeriod', e === 'pulse'); show('pHz', e === 'strobe'); show('pDur', e === 'pulse' || e === 'strobe'); paintStrobe(); paintDurationLimit();
   }
   function selectColor(c, btn) {
+    if (S.effect === 'sequence') { S.steps[S.seqSel].color = c; renderSeq(); return; }       // en Secuencia la paleta asigna el color de la fila marcada
     S.color = c; $('custom').value = c.toLowerCase(); $('colorHex').textContent = c;
     document.querySelectorAll('.color').forEach(function (x) { x.classList.toggle('active', x === btn); });
   }
@@ -292,8 +334,9 @@
     var b = document.createElement('button'); b.type = 'button'; b.className = 'color'; b.style.background = c; b.title = c; b.setAttribute('aria-label', c);
     b.addEventListener('click', function () { selectColor(c, b); }); $('colors').appendChild(b); if (c === S.color) b.classList.add('active');
   });
-  $('custom').addEventListener('input', function (e) { var c = e.target.value.toUpperCase(); S.color = c; $('colorHex').textContent = c; document.querySelectorAll('.color').forEach(function (x) { x.classList.remove('active'); }); });
+  $('custom').addEventListener('input', function (e) { var c = e.target.value.toUpperCase(); if (S.effect === 'sequence') { S.steps[S.seqSel].color = c; renderSeq(); return; } S.color = c; $('colorHex').textContent = c; document.querySelectorAll('.color').forEach(function (x) { x.classList.remove('active'); }); });
   document.querySelectorAll('[data-effect]').forEach(function (b) { b.addEventListener('click', function () { setEffect(b.getAttribute('data-effect')); }); });
+  renderSeq();
   setEffect('solid');
 
   function sendCommand() {
@@ -307,7 +350,12 @@
     if (S.effect === 'solid' || S.effect === 'fade') p.fadeMs = Math.round(lim($('fadeMs').value, 0, 10000, 'Duración de transición', ' ms'));
     if (S.effect === 'fade' || S.effect === 'pulse' || S.effect === 'strobe') p.color2 = $('color2').value.toUpperCase();
     if (S.effect === 'pulse') { p.periodMs = Math.round(lim($('periodMs').value, 600, 10000, 'Período', ' ms')); p.durationMs = Math.round(lim($('durationS').value, 0, 600, 'Duración', ' s') * 1000); }
-    if (S.effect === 'strobe') { p.hz = lim($('hz').value || 2, 0.5, S.maxHz, 'Frecuencia', ' Hz'); p.durationMs = Math.round(lim($('durationS').value || 10, 0.5, S.maxStrobeMs / 1000, 'Duración', ' s') * 1000); }
+    if (S.effect === 'strobe') { p.hz = lim(Number($('hz').value) || 2, 0.5, S.maxHz, 'Frecuencia', ' Hz'); p.durationMs = Math.round(lim(Number($('durationS').value) || 10, 0.5, S.maxStrobeMs / 1000, 'Duración', ' s') * 1000); }
+    if (S.effect === 'sequence') {
+      var steps = S.steps.map(function (st, i) { return { color: st.color.toUpperCase(), holdMs: Math.round(lim(st.sec, 0.5, 600, 'Segundos del color ' + (i + 1), ' s') * 1000) }; });
+      var minHold = Math.min.apply(null, steps.map(function (st) { return st.holdMs; }));
+      p = { effect: 'sequence', steps: steps, fadeMs: Math.round(lim($('seqFadeMs').value, 0, Math.min(10000, minHold), 'Transición', ' ms')), durationMs: Math.round(lim($('seqDurationS').value, 0, 600, 'Duración', ' s') * 1000) };
+    }
     var msg = { protocolVersion: PROTOCOL, type: 'command', commandId: newId(), leadMs: Number($('lead').value) || 1500, payload: p };
     if (notes.length) { alertBox('info', notes.join(' · '), 'adjust'); setTimeout(function () { alertBox('info', null, 'adjust'); }, 6000); }
     track(msg, 'command');

@@ -146,6 +146,29 @@ en 1: hub y clientes comparan `incarnation` y reinician su línea base en lugar 
 * ACK **duplicado**, **desconocido** (id inexistente o sin id) o **tardío** (de un comando ya superado) se clasifican y se ignoran: nunca limpian a otro comando ni tocan el estado mostrado.
 * Un `error` con `commandId` cierra solo ese comando.
 
+## Efecto `sequence` — secuencia de colores (V3.3.0)
+
+Lista de **2 a 12 colores**; cada uno se muestra `holdMs` y al terminar pasa al siguiente. Tras el último **vuelve al primero y repite sin fin** (`durationMs: 0`) hasta que el Master envíe `stop` u otra orden. Todos los teléfonos evalúan el mismo tiempo de servidor desde `executeAt`, por lo que cambian de color **a la vez**.
+
+```json
+{ "protocolVersion": 1, "type": "command", "commandId": "seq-0001-abcd", "leadMs": 1500,
+  "payload": { "effect": "sequence",
+               "steps": [ { "color": "#75AADB", "holdMs": 3000 }, { "color": "#FFFFFF", "holdMs": 3000 } ],
+               "fadeMs": 0, "durationMs": 0 } }
+```
+
+| Campo | Regla |
+|---|---|
+| `steps[]` | 2–12 objetos `{ color: "#RRGGBB", holdMs }`; campos desconocidos → `UNKNOWN_FIELD`; más/menos pasos → `INVALID_FIELD` |
+| `steps[].holdMs` | entero 500–600 000 ms (0,5 s – 10 min), **por color** (cada color puede durar distinto) |
+| `fadeMs` | 0–10 000 y **≤ el paso más corto**; 0 = corte seco (por defecto); >0 = fundido al entrar en cada paso |
+| `durationMs` | 0 = ininterrumpida hasta DETENER TODO (por defecto); >0 = termina a ese tiempo y queda en el color activo (máx. `MAX_PULSE_DURATION_MS`) |
+| `color` | se ignora; el servidor lo deriva de `steps[0]` (los clientes antiguos que lo leen muestran el primer color) |
+
+**Seguridad visual.** Un paso < 1 s equivale a un parpadeo: exige **habilitar el strobe** de la sesión (`setConfig` con la advertencia) o se rechaza con `STROBE_DISABLED` (+ `commandId`); además la frecuencia de cambio nunca supera `MAX_STROBE_HZ` (`OUT_OF_RANGE`). Pasos ≥ 1 s no requieren strobe. En el teléfono: «Efectos: desactivados» o más de 10 s sin conexión la dejan **fija en el primer color**; «reducir movimiento» del sistema solo la afecta si hay pasos < 1 s (los cambios lentos no son movimiento ni parpadeo).
+
+**Compatibilidad.** Páginas de participante **antiguas** (JS anterior a 3.3.0, ya abiertas) no conocen `sequence` y la ignoran (siguen mostrando lo anterior): hay que **recargar** esas páginas. Las páginas de V3.0 (sin `hello`) reciben un estado sólido con el primer color.
+
 ## Ciclo de vida de una orden (V3.2.1: `public/js/orders.js`)
 
 Toda orden tiene dos etapas, derivadas de lo que realmente ocurrió (el texto del panel nunca es fijo):

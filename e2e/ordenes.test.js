@@ -149,3 +149,19 @@ test('E2E cliente: al cargar, el teléfono abre UN solo WebSocket y no se recone
   await m.page.waitForFunction(() => /^APLICADA: 1 dispositivos confirmaron/.test(document.getElementById('kApplied').textContent), { timeout: 9000 });
   assert.equal(opened, 1, 'un solo WebSocket'); assert.equal(hellos, 1, 'un solo hello (sin reconexiones espurias)');
 });
+
+test('E2E órdenes (regresión): pasar de Pulso con duración 0 («sin límite») a Strobe NO deja el strobe en 0,5 s: usa 10 s y no avisa de ajustes', { skip, timeout: 60000 }, async t => {
+  const { srv, browser } = await setup(t);
+  const m = await openMaster(browser, srv.base);
+  await m.page.click('[data-effect=pulse]');
+  await m.page.$eval('#durationS', n => { n.value = '0'; });                          // como en la captura del usuario
+  await m.page.click('[data-effect=strobe]');
+  assert.equal(await m.page.$eval('#durationS', n => n.value), '10', 'al elegir Strobe, el 0 heredado de Pulso pasa a 10 s');
+  await m.page.click('#riskAck'); await m.page.click('#strobeEnable');
+  await m.page.waitForFunction(() => /HABILITADO/.test(document.getElementById('strobeState').textContent), { timeout: 5000 });
+  await m.page.$eval('#durationS', n => { n.value = '0'; });                          // y aunque se teclee 0 a mano
+  await m.page.click('#send');
+  await waitText(m.page, 'kAccepted', /^ACEPTADA POR EL SERVIDOR/, 5000);
+  assert.equal((await srv.app.sessions.get(m.sid)).state.payload.durationMs, 10000);
+  assert.ok(!/ajustado/.test(await m.page.$eval('#alerts', n => n.textContent)), 'sin avisos de ajuste espurios');
+});
