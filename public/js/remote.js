@@ -322,7 +322,7 @@
     var ws;
     try { ws = new WebSocket(scheme + '//' + location.host + '/ws'); }      // sin datos sensibles en la URL
     catch (e) { return scheduleReconnect(undefined, 'ctor'); }
-    S.ws = ws;
+    S.ws = ws; S.connectAt = Date.now();
     setConn(S.everConnected ? '● RECONECTANDO' : '● CONECTANDO', false);
     var opened = false;
     ws.onopen = function () {
@@ -380,13 +380,17 @@
   }
 
   // ---------------------------------------------------------------- eventos del navegador
+  // Un intento de conexión RECIÉN iniciado (< 4 s) todavía puede completarse: forzar otra reconexión lo cerraría y haría perder la bienvenida/órdenes en curso.
+  // Ocurría al cargar la página: `pageshow` -> onVisible() con el primer WebSocket aún conectando -> reconexión innecesaria que cerraba el socket sano; una orden
+  // enviada en esa ventana llegaba como estado «inicial» y ese teléfono no informaba la aplicación. Un socket colgado (> 4 s) sí se reemplaza.
+  function connecting() { return Boolean(S.ws && S.ws.readyState === 0 && Date.now() - (S.connectAt || 0) < 4000); }
   function onVisible() {
     if (document.hidden) return;
     ensureLoop(); requestWakeLock();
-    if (!S.connected && !S.closedByUser && !S.fatal) { clearTimeout(S.reconnectTimer); S.reconnectTimer = null; S.reconnectTimer = setTimeout(function () { S.reconnectTimer = null; connect(); }, Math.random() * 800); }
+    if (!S.connected && !connecting() && !S.closedByUser && !S.fatal) { clearTimeout(S.reconnectTimer); S.reconnectTimer = null; S.reconnectTimer = setTimeout(function () { S.reconnectTimer = null; connect(); }, Math.random() * 800); }
     else if (S.connected) clockBurst();
   }
-  function onOnline() { if (!S.connected && !S.closedByUser && !S.fatal) { clearTimeout(S.reconnectTimer); S.reconnectTimer = setTimeout(function () { S.reconnectTimer = null; connect(); }, Math.random() * 1000); } }
+  function onOnline() { if (!S.connected && !connecting() && !S.closedByUser && !S.fatal) { clearTimeout(S.reconnectTimer); S.reconnectTimer = setTimeout(function () { S.reconnectTimer = null; connect(); }, Math.random() * 1000); } }
   function requestWakeLock() {
     try {
       if (!('wakeLock' in navigator) || S.wakeLock) return;

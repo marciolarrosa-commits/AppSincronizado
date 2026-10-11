@@ -7,7 +7,8 @@
  *    una orden vieja después de una nueva podría revertirla, así que los superados NO se reintentan ni se reenvían al reconectar
  *    (se siguen recordando hasta recibir su ACK, para clasificarlo bien: es un ACK "tardío", válido pero sin efecto sobre la orden actual).
  *  - Reintento: si no hay ACK en `ackTimeoutMs`, se reenvía el MISMO commandId (el servidor es idempotente) hasta `maxAttempts` veces;
- *    después la orden se declara fallida y se informa al operador.
+ *    después la orden se declara fallida (`failReason: 'retries'`) y se informa al operador. Sin conexión más de `maxResendAgeMs`, también
+ *    se declara fallida (`failReason: 'offline'`): nada queda pendiente para siempre.
  *  - Desconexión: los comandos enviados pasan a `queued`; al reconectar solo se reenvía el más reciente no superado y únicamente si
  *    no es más viejo que `maxResendAgeMs` (una intención vieja no se reaplica a ciegas).
  *  - ACK duplicado, desconocido o tardío: se clasifican y se ignoran; nunca corrompen el estado.
@@ -69,9 +70,18 @@
       due: function () {
         var t = now(); var resend = []; var failed = [];
         pending.forEach(function (e) {
+          if (e.state === 'queued') {
+            // Sin conexión: se espera a reconectar, pero NO para siempre. Pasado maxResendAgeMs la orden se descarta y se declara fallida
+            // (failReason 'offline'); una orden ya superada se descarta sin avisar. Así ninguna orden queda pendiente indefinidamente.
+            if (t - e.createdAt > maxResendAgeMs) {
+              pending.delete(e.id);
+              if (e.superseded) stats.staleDropped++; else { stats.failed++; e.failReason = 'offline'; failed.push(e); }
+            }
+            return;
+          }
           if (e.state !== 'sent' || t - e.lastSentAt < e.timeoutMs) return;
           if (e.superseded) { pending.delete(e.id); stats.staleDropped++; return; }                 // ya no importa: hay uno más nuevo
-          if (e.attempts >= maxAttempts) { pending.delete(e.id); stats.failed++; failed.push(e); return; }
+          if (e.attempts >= maxAttempts) { pending.delete(e.id); stats.failed++; e.failReason = 'retries'; failed.push(e); return; }
           e.attempts++; e.lastSentAt = t; stats.retries++; resend.push(e);
         });
         resend.sort(function (a, b) { return a.order - b.order; });

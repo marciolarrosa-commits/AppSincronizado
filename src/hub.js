@@ -107,7 +107,7 @@ function createHub({ config, store, metrics, logger, auth, getHealth }) {
   // vuelven a empezar: sin esto el hub descartaría TODAS las órdenes nuevas como "viejas" (el Master vería "aceptada" pero nadie recibiría nada).
   function syncIncarnation(room, inc) {
     if (inc === undefined || inc === room.incarnation) return;
-    if (room.incarnation !== undefined) { logger.warn('session_incarnation_changed', { sessionId: room.id }); metrics.inc('session_incarnation_changes'); room.lastDeliverVersion = -1; room.knownVersion = -1; room.latest = null; }
+    if (room.incarnation !== undefined) { logger.warn('session_incarnation_changed', { sessionId: room.id }); metrics.inc('session_incarnation_changes'); room.lastDeliverVersion = -1; room.knownVersion = -1; room.latest = null; if (room.cmdByVersion) room.cmdByVersion.clear(); }
     room.incarnation = inc;
   }
 
@@ -138,8 +138,16 @@ function createHub({ config, store, metrics, logger, auth, getHealth }) {
     syncIncarnation(room, st.incarnation);
     if (st.stateVersion > room.knownVersion) room.knownVersion = st.stateVersion;
     if (!room.latest || st.stateVersion > room.latest.stateVersion) room.latest = st;
+    rememberCommand(room, st);
     deliver(room, st);
     if (room.masters.size) scheduleStats(room, st);
+  }
+
+  // commandId de las últimas versiones (acotado): sirve para validar que una confirmación 'applied' corresponde a la orden de esa versión.
+  function rememberCommand(room, st) {
+    if (!room.cmdByVersion) room.cmdByVersion = new Map();
+    room.cmdByVersion.set(st.stateVersion, st.commandId);
+    if (room.cmdByVersion.size > 12) room.cmdByVersion.delete(room.cmdByVersion.keys().next().value);
   }
 
   // Difunde UNA orden a todos los dispositivos locales de la sesión (serializada una sola vez, en lotes para no bloquear el event loop).
@@ -225,13 +233,32 @@ function createHub({ config, store, metrics, logger, auth, getHealth }) {
     if (c.total <= 0) ipConns.delete(conn.ip);
   }
 
-  function protoError(conn, e) {
+  // Error de protocolo hacia el cliente. Si está asociado a una ORDEN concreta (commandId válido) se responde siempre —el panel lo necesita para
+  // cerrar esa orden—, pero con un presupuesto por conexión (errLimiter) para que un cliente defectuoso no genere un torrente de respuestas.
+  // Los errores SIN commandId siguen limitados a 1 por segundo (no hay a quién asociarlos y no deben amplificar). Nunca se inventa un commandId.
+  function protoError(conn, e, commandId) {
     metrics.inc('protocol_errors');
     const code = e.code || 'INVALID_MESSAGE';
     conn.protoErrors++;
     const t = nowMs();
-    if (t - conn.lastErrorAt > 1000) { conn.lastErrorAt = t; send(conn, P.server.error(code, e.message)); }
+    const id = P.safeCommandId(commandId);
+    if (id) {
+      if (conn.errLimiter ? conn.errLimiter.take() : true) { if (!send(conn, P.server.error(code, e.message, { commandId: id }))) metrics.inc('replies_undeliverable'); }
+      else metrics.inc('error_replies_suppressed');
+    } else if (t - conn.lastErrorAt > 1000) { conn.lastErrorAt = t; send(conn, P.server.error(code, e.message)); }
     if (conn.protoErrors >= 8) { conn.onBadJoin && conn.onBadJoin(); closeConn(conn, CLOSE.PROTOCOL, 'TOO_MANY_ERRORS'); }
+  }
+
+  // Un Master superó el límite general de mensajes. Si lo descartado era una orden de CONTROL con commandId válido se le avisa (RATE_LIMITED + commandId)
+  // para que el panel cierre esa orden en vez de dejarla "enviando"; la telemetría (ping/applied) y todo lo no asociable a una orden se descarta
+  // sin responder. Las respuestas tienen su propio presupuesto (rlReplyLimiter): si se agota, se descarta en silencio y el panel resuelve por timeout.
+  function replyRateLimited(conn, data) {
+    const ctl = conn.role === 'master' ? P.peekControl(data, config.maxMessageBytes) : null;
+    if (!ctl) { metrics.inc('rate_limited_unanswered'); return; }
+    if (!ctl.commandId) { metrics.inc('rate_limited_unanswerable'); conn.log.debug('rate_limited_control_without_id', { type: ctl.type }); return; }
+    if (!conn.rlReplyLimiter || !conn.rlReplyLimiter.take()) { metrics.inc('rate_limited_replies_suppressed'); return; }
+    if (send(conn, P.server.error('RATE_LIMITED', 'Demasiados mensajes por segundo: la orden no se procesó', { commandId: ctl.commandId }))) metrics.inc('rate_limited_replies');
+    else metrics.inc('replies_undeliverable');
   }
 
   function onMessage(conn, data, isBinary) {
@@ -246,11 +273,13 @@ function createHub({ config, store, metrics, logger, auth, getHealth }) {
     if (conn.limiter && !conn.limiter.take()) {
       metrics.inc('rate_limited');
       conn.violations++;
+      replyRateLimited(conn, data);              // órdenes de control con commandId: respuesta acotada; el resto se descarta sin responder
       if (conn.violations >= 20) closeConn(conn, CLOSE.RATE_LIMITED, 'RATE_LIMITED');
-      return;                                    // se descarta sin responder (no amplificar)
+      return;
     }
     let msg;
-    try { msg = P.parseEnvelope(data, config.maxMessageBytes); } catch (e) { return protoError(conn, e); }
+    try { msg = P.parseEnvelope(data, config.maxMessageBytes); }
+    catch (e) { const ctl = conn.role === 'master' ? P.peekControl(data, config.maxMessageBytes) : null; return protoError(conn, e, ctl && ctl.commandId); }
 
     if (!conn.joined) {
       if (msg.type !== 'hello') { protoError(conn, new P.ProtocolError('NOT_JOINED', 'Primero hay que enviar hello')); return closeConn(conn, CLOSE.PROTOCOL, 'NOT_JOINED'); }
@@ -284,9 +313,9 @@ function createHub({ config, store, metrics, logger, auth, getHealth }) {
     }
   }
 
-  function reject(conn, code, wsCode, message) {
+  function reject(conn, code, wsCode, message, commandId) {
     metrics.inc('ws_rejected_' + code.toLowerCase());
-    send(conn, P.server.error(code, message));
+    send(conn, P.server.error(code, message, commandId ? { commandId } : undefined));
     closeConn(conn, wsCode, code);
   }
 
@@ -305,6 +334,8 @@ function createHub({ config, store, metrics, logger, auth, getHealth }) {
       conn.role = 'master'; conn.epoch = sess.epoch; conn.deviceId = 'master-' + conn.id;
       conn.limiter = new TokenBucket(config.masterCommandsPerSec * 4, config.masterCommandBurst * 4);   // además de los comandos, pings
       conn.cmdLimiter = new TokenBucket(config.masterCommandsPerSec, config.masterCommandBurst);
+      conn.errLimiter = new TokenBucket(config.masterCommandsPerSec * 4, config.masterCommandBurst * 4);   // respuestas de error asociadas a una orden
+      conn.rlReplyLimiter = new TokenBucket(2, 4);                                                        // respuestas «RATE_LIMITED» (más estrictas: no agravar la saturación)
       room.masters.add(conn);
     } else {
       if (room.publics.size >= config.maxPublicPerSession) return reject(conn, 'SESSION_FULL', CLOSE.TRY_LATER, 'Sesión completa');
@@ -322,7 +353,7 @@ function createHub({ config, store, metrics, logger, auth, getHealth }) {
     room.strobeEnabled = sess.strobeEnabled;
     syncIncarnation(room, sess.state.incarnation);
     if (sess.state.stateVersion > room.knownVersion) room.knownVersion = sess.state.stateVersion;      // lo informa el welcome; NO toca lastDeliverVersion (la difusión en curso sigue su curso)
-    if (!room.latest || sess.state.stateVersion >= room.latest.stateVersion) room.latest = sess.state;
+    if (!room.latest || sess.state.stateVersion >= room.latest.stateVersion) { room.latest = sess.state; rememberCommand(room, sess.state); }
     store.touchSession(sess.id).catch(() => {});
 
     send(conn, P.server.welcome({
@@ -344,15 +375,15 @@ function createHub({ config, store, metrics, logger, auth, getHealth }) {
     return handleMasterMessageInner(conn, msg).catch(e => {
       metrics.inc('commands_failed'); metrics.inc('store_errors');
       logger.error('master_message_failed', { sessionId: conn.sessionId, type: msg.type, error: e.message });
-      send(conn, P.server.error('PUBLISH_FAILED', 'No se pudo procesar la orden (almacenamiento no disponible), reintentá', { commandId: msg.commandId || null }));
+      send(conn, P.server.error('PUBLISH_FAILED', 'No se pudo procesar la orden (almacenamiento no disponible), reintentá', { commandId: msg.commandId }));
     });
   }
 
   async function handleMasterMessageInner(conn, msg) {
     const room = conn.room;
     const sess = await store.getSession(conn.sessionId);
-    if (!sess) return reject(conn, 'SESSION_NOT_FOUND', CLOSE.NOT_FOUND, 'La sesión terminó');
-    if (sess.epoch !== conn.epoch) { metrics.inc('unauthorized_master'); return reject(conn, 'UNAUTHORIZED', CLOSE.UNAUTHORIZED, 'Token revocado'); }
+    if (!sess) return reject(conn, 'SESSION_NOT_FOUND', CLOSE.NOT_FOUND, 'La sesión terminó', P.safeCommandId(msg.commandId));
+    if (sess.epoch !== conn.epoch) { metrics.inc('unauthorized_master'); return reject(conn, 'UNAUTHORIZED', CLOSE.UNAUTHORIZED, 'Token revocado', P.safeCommandId(msg.commandId)); }
     room.strobeEnabled = sess.strobeEnabled;
 
     try {
@@ -386,7 +417,7 @@ function createHub({ config, store, metrics, logger, auth, getHealth }) {
       const t0 = nowMs();
       const res = await store.applyState(conn.sessionId, { commandId, executeAt, serverTimestamp: ts, payload });
       metrics.observe('storeMs', nowMs() - t0);
-      if (!res) return reject(conn, 'SESSION_NOT_FOUND', CLOSE.NOT_FOUND, 'La sesión terminó');
+      if (!res) return reject(conn, 'SESSION_NOT_FOUND', CLOSE.NOT_FOUND, 'La sesión terminó', commandId);
       metrics.inc(res.duplicate ? 'commands_duplicate' : 'commands_accepted');
       logger.info('command_accepted', { sessionId: conn.sessionId, commandId, stateVersion: res.state.stateVersion, effect: res.duplicate ? undefined : res.state.payload.effect, duplicate: res.duplicate });
       // `ack` = el servidor ACEPTÓ y publicó la orden. NO significa que los dispositivos ya la aplicaron (eso lo informa `stats`).
@@ -394,11 +425,11 @@ function createHub({ config, store, metrics, logger, auth, getHealth }) {
     } catch (e) {
       if (e instanceof P.ProtocolError) {
         metrics.inc('commands_rejected');
-        return send(conn, P.server.error(e.code, e.message, { commandId: msg.commandId || null }));
+        return send(conn, P.server.error(e.code, e.message, { commandId: msg.commandId }));      // solo se incluye si es un commandId válido
       }
       metrics.inc('commands_failed');
       logger.error('command_failed', { sessionId: conn.sessionId, error: e.message });
-      send(conn, P.server.error('PUBLISH_FAILED', 'No se pudo publicar la orden, reintentá', { commandId: msg.commandId || null }));
+      send(conn, P.server.error('PUBLISH_FAILED', 'No se pudo publicar la orden, reintentá', { commandId: msg.commandId }));
     }
   }
 
@@ -407,7 +438,14 @@ function createHub({ config, store, metrics, logger, auth, getHealth }) {
   function handleApplied(conn, a) {
     const room = conn.room;
     const latest = room.latest ? room.latest.stateVersion : 0;
-    if (a.stateVersion > latest || a.stateVersion < latest - 5) return;     // solo versiones recientes
+    if (a.stateVersion > latest || a.stateVersion < latest - 5) { metrics.inc('applied_out_of_window'); return; }     // solo versiones recientes
+    // La confirmación debe corresponder a ESA orden: un dispositivo no puede contar para la orden de otra versión con un commandId ajeno.
+    const known = room.cmdByVersion && room.cmdByVersion.get(a.stateVersion);
+    if (known !== undefined && known !== a.commandId) { metrics.inc('applied_mismatch'); return; }
+    // Una confirmación por dispositivo y versión: los duplicados no inflan el conteo.
+    if (!conn.applied || conn.applied.inc !== room.incarnation) conn.applied = { inc: room.incarnation, v: [] };
+    if (conn.applied.v.includes(a.stateVersion)) { metrics.inc('applied_duplicate'); return; }
+    conn.applied.v.push(a.stateVersion); if (conn.applied.v.length > 6) conn.applied.v.shift();
     metrics.inc('applied_reports');
     const key = conn.sessionId + '|' + a.stateVersion;
     let e = ackBuf.get(key);

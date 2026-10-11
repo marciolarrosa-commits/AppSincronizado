@@ -130,9 +130,11 @@ test('Redis caído: el sistema informa degradación, rechaza órdenes sin perder
   const phone = await joinPublic(A.wsUrl, s.sessionId, dev(1));
   redis.kill();
   await sleep(500);
-  m.send(color('#FF3B30'));
+  m.send({ ...color('#FF3B30'), commandId: 'cmd-redis-caido-01' });
   const err = await m.waitFor('error', 8000);
   assert.ok(['PUBLISH_FAILED', 'UNAVAILABLE'].includes(err.code), err.code);
+  assert.equal(err.commandId, 'cmd-redis-caido-01', 'el error por almacenamiento caído se asocia a SU orden (el panel la cierra como rechazada, no queda «enviando»)');
+  assert.equal(m.msgs.filter(x => x.type === 'ack').length, 0, 'no hubo aceptación falsa');
   assert.equal((await http(A.base, 'GET', '/healthz')).status, 200, 'el proceso sigue vivo');
   await sleep(5500);                                      // el sondeo de salud detecta el almacenamiento caído
   assert.equal((await http(A.base, 'GET', '/readyz')).status, 503, 'readyz informa que no está listo');
@@ -160,4 +162,36 @@ test('Redis: el interruptor de la app Flash habilitado en la instancia A lo ven 
   assert.equal((await fetch(C.base + '/flash')).status, 200, 'una instancia nueva lo lee al arrancar');
   await http(B.base, 'POST', '/api/admin/flash', { token: await login(B.base), body: { enabled: false } });
   assert.equal((await fetch(B.base + '/flash')).status, 403);
+});
+
+test('Redis: los cuatro efectos con la carga útil EXACTA del panel (solid, fade, pulse, strobe) se aceptan en A y llegan íntegros a un teléfono de B; el strobe sigue exigiendo habilitación', { skip, timeout: 60000 }, async t => {
+  const rport = await freePort(); const redis = await startRedis(rport); t.after(() => redis.kill());
+  const url = `redis://127.0.0.1:${rport}`;
+  const A = await startServer({ redisUrl: url, instanceId: 'A', redisPrefix: 'te:' }); t.after(A.stop);
+  const B = await startServer({ redisUrl: url, instanceId: 'B', redisPrefix: 'te:' }); t.after(B.stop);
+  const op = await login(A.base); const s = await createSession(A.base, op);
+  const master = await joinMaster(A.wsUrl, s.sessionId, s.masterToken);
+  const phone = await joinPublic(B.wsUrl, s.sessionId, dev(1));
+  const PANEL = {
+    solid: { effect: 'solid', color: '#FFD400', fadeMs: 500 },
+    fade: { effect: 'fade', color: '#FFD400', fadeMs: 500, color2: '#0A84FF' },
+    pulse: { effect: 'pulse', color: '#FFD400', color2: '#0A84FF', periodMs: 2000, durationMs: 10000 },
+    strobe: { effect: 'strobe', color: '#FFD400', color2: '#0A84FF', hz: 2, durationMs: 10000 }
+  };
+  const send = (id, payload) => master.send({ protocolVersion: 1, type: 'command', commandId: id, leadMs: 300, payload });
+  for (const [i, name] of ['solid', 'fade', 'pulse'].entries()) {
+    const id = 'redis-fx-' + String(i + 1).padStart(6, '0'); send(id, PANEL[name]);
+    const ack = await master.waitFor(m => m.type === 'ack' && m.commandId === id, 4000, 'ack ' + name);
+    const st = await phone.waitFor(m => m.type === 'state' && m.commandId === id, 4000, 'estado ' + name + ' en B');
+    assert.equal(st.stateVersion, ack.stateVersion); assert.equal(st.payload.effect, name);
+    for (const [k, v] of Object.entries(PANEL[name])) assert.equal(st.payload[k], v, `${name}.${k} llegó intacto a la otra instancia`);
+  }
+  send('redis-fx-strobe-off', PANEL.strobe);
+  const e = await master.waitFor('error', 4000); assert.equal(e.code, 'STROBE_DISABLED'); assert.equal(e.commandId, 'redis-fx-strobe-off');
+  master.send({ protocolVersion: 1, type: 'setConfig', strobeEnabled: true, acknowledgeRisk: true });
+  assert.equal((await master.waitFor('config', 4000)).strobeEnabled, true);
+  send('redis-fx-strobe-on', PANEL.strobe);
+  await master.waitFor(m => m.type === 'ack' && m.commandId === 'redis-fx-strobe-on', 4000);
+  const st = await phone.waitFor(m => m.type === 'state' && m.commandId === 'redis-fx-strobe-on', 4000);
+  assert.equal(st.payload.effect, 'strobe'); assert.equal(st.payload.hz, 2); assert.equal(st.payload.duty, 0.25); assert.equal(st.payload.durationMs, 10000);
 });

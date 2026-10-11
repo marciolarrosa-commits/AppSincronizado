@@ -15,6 +15,25 @@ class ProtocolError extends Error {
   constructor(code, message) { super(message || code); this.code = code; }
 }
 
+/** Devuelve el commandId solo si tiene el formato aceptado por el protocolo; si no, undefined. Nunca se refleja ni se inventa un identificador. */
+function safeCommandId(v) { return typeof v === 'string' && COMMAND_ID_RE.test(v) ? v : undefined; }
+
+const CONTROL_TYPES = new Set(['command', 'stop', 'setConfig']);
+/**
+ * Inspección BARATA y segura de un mensaje que no se va a procesar (p. ej. descartado por límite de frecuencia) para saber si era una orden de
+ * CONTROL y cuál era su commandId. Devuelve { type, commandId|undefined } o null (telemetría, no es JSON, demasiado grande, tipo desconocido).
+ * No valida el resto del mensaje ni lo ejecuta.
+ */
+function peekControl(raw, maxBytes) {
+  try {
+    const size = typeof raw === 'string' ? Buffer.byteLength(raw) : raw.length;
+    if (size > maxBytes) return null;
+    const m = JSON.parse(typeof raw === 'string' ? raw : raw.toString('utf8'));
+    if (!isPlainObject(m) || typeof m.type !== 'string' || !CONTROL_TYPES.has(m.type)) return null;
+    return { type: m.type, commandId: safeCommandId(m.commandId) };
+  } catch { return null; }
+}
+
 function isPlainObject(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
 
 function onlyKeys(obj, allowed, where) {
@@ -143,7 +162,12 @@ function validateSetConfig(msg) {
 // --- Constructores de mensajes del servidor (siempre llevan protocolVersion y serverTimestamp) ---
 const server = {
   welcome: (o) => ({ protocolVersion: PROTOCOL_VERSION, type: 'welcome', serverTimestamp: Date.now(), ...o }),
-  error: (code, message, extra) => ({ protocolVersion: PROTOCOL_VERSION, type: 'error', code, message, serverTimestamp: Date.now(), ...(extra || {}) }),
+  // `commandId` es opcional y SOLO se incluye si es un identificador válido (formato del protocolo); sin él, el error no se asocia a ninguna orden.
+  error: (code, message, extra) => {
+    const out = { protocolVersion: PROTOCOL_VERSION, type: 'error', code, message, serverTimestamp: Date.now(), ...(extra || {}) };
+    if ('commandId' in out) { const id = safeCommandId(out.commandId); if (id) out.commandId = id; else delete out.commandId; }
+    return out;
+  },
   pong: (t0) => ({ protocolVersion: PROTOCOL_VERSION, type: 'pong', t0, serverTimestamp: Date.now() }),
   state: (sessionId, state, extra) => ({
     protocolVersion: PROTOCOL_VERSION, type: 'state', sessionId,
@@ -154,5 +178,5 @@ const server = {
 
 module.exports = {
   PROTOCOL_VERSION, SESSION_RE, DEVICE_RE, COMMAND_ID_RE, COLOR_RE, EFFECTS,
-  ProtocolError, parseEnvelope, validateHello, validatePing, validateApplied, validateCommand, validateStop, validateSetConfig, server
+  ProtocolError, safeCommandId, peekControl, parseEnvelope, validateHello, validatePing, validateApplied, validateCommand, validateStop, validateSetConfig, server
 };

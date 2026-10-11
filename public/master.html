@@ -48,6 +48,7 @@ label{font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:4
 .risk{background:#2a1810;border:1px solid #6b3a1d;border-radius:12px;padding:12px 14px;font-size:13px;color:#ffd6b0}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px}
 .kv b{color:var(--muted);font-weight:500}
+.st-ok{color:var(--ok)}.st-bad{color:var(--danger)}.st-warn{color:var(--warn)}.st-pending{color:var(--fg)}.st-muted{color:var(--muted)}
 ul.sessions{list-style:none;margin:10px 0 0;padding:0}
 ul.sessions li{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-family:ui-monospace,monospace}
 @media(max-width:800px){.grid{grid-template-columns:1fr}.wrap{padding:14px}.metric{font-size:42px}.colors{grid-template-columns:repeat(4,1fr)}}
@@ -150,13 +151,14 @@ ul.sessions li{display:flex;justify-content:space-between;align-items:center;pad
       <div class="card">
         <h2>Última orden</h2>
         <div class="kv">
-          <b>Servidor</b><span id="kAccepted">—</span>
-          <b>Dispositivos</b><span id="kApplied">—</span>
+          <b>Servidor</b><span id="kAccepted" aria-live="polite">—</span>
+          <b>Dispositivos</b><span id="kApplied" aria-live="polite">—</span>
           <b>A tiempo</b><span id="kOnTime">—</span>
           <b>Desviación</b><span id="kDev">—</span>
           <b>Estado vigente</b><span id="kState">—</span>
         </div>
-        <p class="muted small" style="margin:10px 0 0">«Aceptada» significa que el servidor validó y publicó la orden. «Aplicada» lo informa una muestra de teléfonos cuando ya mostraron el color (sirve para saber si llegó a tiempo).</p>
+        <p class="muted small" style="margin:10px 0 0">«Aceptada» significa que el servidor validó y publicó la orden. «Aplicada» solo se declara cuando una muestra de teléfonos lo confirma; si ninguno informa, el panel lo dice (no lo da por hecho). Una orden sin respuesta termina como «Sin confirmación» y una rechazada muestra el código y el motivo.</p>
+        <ul id="orderLog" class="sessions" aria-label="Órdenes recientes"></ul>
       </div>
 
       <div class="card">
@@ -194,6 +196,7 @@ ul.sessions li{display:flex;justify-content:space-between;align-items:center;pad
 </div>
 <script src="/js/qrcode.js"></script>
 <script src="/js/pending.js"></script>
+<script src="/js/orders.js"></script>
 <script src="/js/master.js"></script>
 </body>
 </html>

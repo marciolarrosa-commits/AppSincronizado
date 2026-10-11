@@ -70,7 +70,7 @@ Strobe bloqueado por defecto: error `STROBE_DISABLED` hasta que el Master lo hab
 | `presence` | Masters | `connected` (suma de todas las instancias, sin Master), `localConnected`, `health` (estado de salud para advertencias) |
 | `config` | Masters | `strobeEnabled` |
 | `restart` | todos | el servidor se está reiniciando: `reconnectAfterMs` sugerido (con jitter) |
-| `error` | quien lo causó | `code`, `message`, `commandId?` |
+| `error` | quien lo causó | `code`, `message`, `commandId?` (solo si es un identificador válido; ver «Ciclo de vida de una orden») |
 
 **Aceptada ≠ aplicada**: `ack` solo prueba que el servidor validó y publicó; `stats` informa cuántos dispositivos (de una muestra) ya la aplicaron y con qué desviación.
 
@@ -145,6 +145,32 @@ en 1: hub y clientes comparan `incarnation` y reinician su línea base en lugar 
 * Si cae la conexión con comandos pendientes: al reconectar se reenvía **solo el más reciente** y únicamente si tiene ≤ 15 s.
 * ACK **duplicado**, **desconocido** (id inexistente o sin id) o **tardío** (de un comando ya superado) se clasifican y se ignoran: nunca limpian a otro comando ni tocan el estado mostrado.
 * Un `error` con `commandId` cierra solo ese comando.
+
+## Ciclo de vida de una orden (V3.2.1: `public/js/orders.js`)
+
+Toda orden tiene dos etapas, derivadas de lo que realmente ocurrió (el texto del panel nunca es fijo):
+
+| Etapa | Estados | Qué los produce |
+|---|---|---|
+| **Servidor** | `ENVIANDO…` → `ACEPTADA POR EL SERVIDOR` · `RECHAZADA: CÓDIGO — motivo` · `SIN CONFIRMACIÓN` · `REEMPLAZADA` | `ack` con su `commandId` · `error` con su `commandId` · reintentos agotados / tope de tiempo / sin conexión · envío de una orden más nueva |
+| **Dispositivos** (solo si fue aceptada) | `esperando…` → `APLICADA` · `APLICADA PARCIALMENTE` · `SIN CONFIRMACIÓN DE DISPOSITIVOS` · `SIN DISPOSITIVOS CONECTADOS` | `stats` de **su** `stateVersion` (muestra): se considera aplicada con ≥ 80 % de la muestra esperada (`ackRate × connected`); al vencer el plazo (`executeAt` + 6 s) queda en lo último informado |
+
+* **Todas terminan**: reintento a los 3 s con el mismo `commandId` (máx. 3 intentos) → `SIN CONFIRMACIÓN`; en cola sin conexión > 15 s → `SIN CONFIRMACIÓN` (sin conexión); tope absoluto de 20 s; plazo de confirmación de dispositivos de 6 s tras `executeAt`.
+* **Solo la orden más reciente gobierna los indicadores.** Una respuesta tardía (ACK, error, `stats`) actualiza el registro de SU orden —un ACK tardío corrige una orden ya declarada sin confirmación y la marca «confirmación tardía»— pero no toca la mostrada.
+* **Aceptada ≠ aplicada**: si ningún teléfono informa, el panel dice «SIN CONFIRMACIÓN DE DISPOSITIVOS … aplicación NO demostrada»; nunca la da por aplicada.
+* Un `error` **sin** `commandId` no se asocia a ninguna orden (no se inventa uno): se muestra el código y la orden termina por tiempo.
+
+### Errores asociados a una orden (servidor)
+
+* `error.commandId` se incluye **solo** si el cliente envió un identificador con el formato del protocolo (`^[A-Za-z0-9_-]{8,64}$`); un identificador inválido nunca se refleja ni se sustituye.
+* Un Master que supera el límite general de mensajes recibe `RATE_LIMITED` + `commandId` para las órdenes de control descartadas, con presupuesto propio (2/s, ráfaga 4) para no agravar la saturación; lo que exceda ese presupuesto se descarta sin responder y el panel lo resuelve por tiempo. La telemetría de participantes (`ping`/`applied`) y los mensajes sin `commandId` se descartan sin responder. A las 20 infracciones la conexión se cierra con 4429.
+* Los errores de envoltorio (`UNSUPPORTED_VERSION`, JSON de un Master con `commandId` legible) se asocian a la orden cuando es posible; un JSON ilegible no puede asociarse.
+* Los errores de órdenes se responden aunque se haya respondido otro hace menos de 1 s (antes se suprimían); los errores sin `commandId` siguen limitados a 1 por segundo por conexión.
+* `PUBLISH_FAILED` (almacenamiento o publicación caídos) lleva el `commandId` y **nunca** va precedido de un `ack`: el estado de la sesión queda intacto y el reintento con el mismo `commandId` se aplica una sola vez.
+
+### Confirmaciones de aplicación (`applied`) — validación en el servidor
+
+Solo cuenta si (a) la versión es la vigente o una de las 5 anteriores, (b) su `commandId` coincide con el de esa versión (`applied_mismatch` si no), y (c) es la primera del dispositivo para esa versión (`applied_duplicate`). Un teléfono que se reconecta recibe el estado vigente en `welcome` y no informa esa orden como aplicada (llegó como estado «inicial»).
 
 ## Validación en el cliente
 

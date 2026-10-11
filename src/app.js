@@ -19,6 +19,7 @@ const { KeyedLimiter } = require('./ratelimit');
 const { SESSION_RE } = require('./protocol');
 
 const PUBLIC_DIR = path.resolve(__dirname, '..', 'public');
+const VERSION = require('../package.json').version;       // permite verificar qué código está realmente activo (log de arranque y /api/admin/status)
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.png': 'image/png', '.webmanifest': 'application/manifest+json; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json; charset=utf-8'
@@ -319,7 +320,7 @@ function createApp(userConfig = {}, deps = {}) {
 
     if (m === 'GET' && p === '/api/admin/status') {
       requireOperator(req);
-      return sendJson(req, res, 200, { health: getHealth(), hub: { ...hub.stats(), internals: hub.debugCounts() }, metrics: metrics.snapshot(), store: { ...lastStore, config: storeConfig() }, flash: { enabled: flashEnabled }, instance: config.instanceId, cluster: { workerId: process.env.NODE_UNIQUE_ID || null }, sessions: await store.countSessions().catch(() => null) });
+      return sendJson(req, res, 200, { version: VERSION, health: getHealth(), hub: { ...hub.stats(), internals: hub.debugCounts() }, metrics: metrics.snapshot(), store: { ...lastStore, config: storeConfig() }, flash: { enabled: flashEnabled }, instance: config.instanceId, cluster: { workerId: process.env.NODE_UNIQUE_ID || null }, sessions: await store.countSessions().catch(() => null) });
     }
 
     if (m === 'GET' || m === 'HEAD') return serveStatic(req, res, p, u.searchParams);
@@ -407,7 +408,7 @@ function createApp(userConfig = {}, deps = {}) {
     hub.start();
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(config.port, config.host, config.listenBacklog, resolve); });
     const addr = server.address();
-    logger.info('listening', { host: config.host, port: addr.port, store: store.kind, storeConfig: storeConfig(), node: process.version, instance: config.instanceId });
+    logger.info('listening', { version: VERSION, host: config.host, port: addr.port, store: store.kind, storeConfig: storeConfig(), node: process.version, instance: config.instanceId });
     return addr;
   }
 

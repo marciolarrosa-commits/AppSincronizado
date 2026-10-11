@@ -62,6 +62,14 @@ Mitigaciones: iniciar sesión antes del evento (el token dura 12 h y sobrevive a
 Una contraseña correcta no debe saltarse el límite (sería un oráculo de fuerza bruta).
 Para el evento, vigilar `ws_rejected_*` y `http_rate_limited`: cualquier valor distinto de cero durante la audiencia es un falso positivo a investigar.
 
+## Respuestas de error y confirmaciones de aplicación (V3.2.1)
+
+* **No se debilitó ningún límite**: siguen vigentes el límite general por conexión (Master 20/s, ráfaga 40; participante 5/s, ráfaga 30), el cupo de órdenes (5/s, ráfaga 10), el cierre con 4429 a las 20 infracciones y los límites por IP.
+* **Sin amplificación**: responder a una orden descartada tiene su propio presupuesto por conexión (2/s, ráfaga 4); los errores de órdenes válidas ya limitadas por el límite general llevan otro (20/s, ráfaga 40); los errores sin `commandId` siguen a 1 por segundo. La telemetría de participantes (`ping`/`applied`) y todo lo no asociable a una orden se descarta **sin responder**. Lo que excede el presupuesto se cuenta (`rate_limited_replies_suppressed`) y el panel lo resuelve por tiempo.
+* **No se refleja ni se inventa información del cliente**: `commandId` solo se devuelve si cumple `^[A-Za-z0-9_-]{8,64}$` (si no, el campo se omite); el JSON ilegible no se «adivina»; un participante que intenta dar órdenes recibe `FORBIDDEN` sin ningún dato suyo.
+* **`applied` no se puede falsear fácilmente**: debe coincidir con el `commandId` de esa versión y se cuenta una vez por dispositivo y versión (`applied_mismatch`, `applied_duplicate`, `applied_out_of_window` en `/metrics`). Sigue siendo una **muestra autodeclarada**: un cliente malicioso podría confirmar una orden que no mostró; por eso el panel la presenta como indicador operativo, no como prueba forense.
+* Probado en `test/ordenes-servidor.test.js` (A1–A3, B, F), reproducible contra el `hub.js` anterior (6 de 10 fallan allí).
+
 ## Interruptor de la app Flash (V3.2)
 
 * Cambiar el estado exige token de **operador** (el token de Master de sesión no sirve); el cuerpo se valida (`enabled` booleano, 400 si no) y el tamaño se limita (413). Se registra `flash_toggled` (sin tokens) y se cuenta en `/metrics`.

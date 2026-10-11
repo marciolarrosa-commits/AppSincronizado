@@ -25,7 +25,7 @@ function faultySocket() {
         let m = null; try { m = JSON.parse(e.data); } catch (x) { /* no JSON */ }
         if (m && m.type === 'ack') {
           net.ackLog.push(m.commandId);
-          if (net.dropAck.has(m.commandId)) return;
+          if (net.dropAllAcks || net.dropAck.has(m.commandId)) return;
           if (net.holdAck.has(m.commandId)) { net.held.push({ sock: this, e }); return; }
         }
         this.onmessage && this.onmessage(e);
@@ -34,7 +34,7 @@ function faultySocket() {
     send(d) {
       let m = null; try { m = JSON.parse(d); } catch (x) { /* no JSON */ }
       if (m && m.commandId) net.sentLog.push(m.type + ':' + m.commandId);
-      if (m && m.commandId && net.dropSend.has(m.commandId)) return;          // "se perdió en el camino"
+      if (m && m.commandId && (net.dropAllCommands || net.dropSend.has(m.commandId))) return;          // "se perdió en el camino"
       this._ws.send(d);
     }
     close(c, r) { this._ws.close(c, r); }
@@ -169,4 +169,56 @@ test('Master/ACK: una orden antigua pendiente NO se reaplica tras reconectar si 
   assert.equal(phone.msgs.filter(x => x.type === 'state').length, 0, 'A (reemplazada) nunca se aplicó');
   assert.equal((await stateOf(srv, sid)).stateVersion, 1);
   assert.notEqual(A, B);
+});
+
+const kAcc = page => page.$eval('#kAccepted', n => n.textContent);
+const waitK = (page, re, timeout = 6000) => page.waitForFunction((r) => new RegExp(r).test(document.getElementById('kAccepted').textContent), { timeout }, re.source);
+
+test('Orden SIN ninguna respuesta: reintenta con el MISMO commandId, termina en «SIN CONFIRMACIÓN» (no queda en ENVIANDO…) y un ACK tardío la corrige', { skip, timeout: 90000 }, async t => {
+  const { srv, m } = await setup(t); const { page, sid } = m;
+  await page.evaluate(() => { window.__net.dropAllAcks = true; });                 // el servidor SÍ recibe y acepta, pero el panel nunca ve el ACK
+  await sendColor(page, '#0A84FF');
+  const id = await lastCommandId(page);
+  await waitK(page, /^ENVIANDO… \(reintento \d\)/, 8000);                         // visible mientras reintenta
+  await waitK(page, /^SIN CONFIRMACIÓN: el servidor no respondió tras 3 intentos/, 15000);
+  assert.equal(await page.$eval('#kAccepted', n => n.className), 'st-bad');
+  assert.deepEqual(await pendingIds(page), [], 'nada queda pendiente');
+  assert.equal((await idsSent(page)).filter(x => x === 'command:' + id).length, 3, 'se envió 3 veces el MISMO commandId');
+  assert.equal((await stateOf(srv, sid)).commandId, id, 'el servidor la aplicó UNA vez (idempotente): no hubo reversión ni duplicado');
+  assert.match(await page.$eval('#kApplied', n => n.textContent), /no aplica/);
+  // llega TARDE la confirmación: se corrige esa orden (es la verdad) y se marca como tardía
+  await page.evaluate(i => window.__net.inject({ protocolVersion: 1, type: 'ack', commandId: i, stateVersion: 1, executeAt: Date.now() + 500, serverTimestamp: Date.now(), duplicate: false }), id);
+  await waitK(page, /^ACEPTADA POR EL SERVIDOR · v1.*confirmación tardía/, 3000);
+  assert.deepEqual(m.errors, []);
+});
+
+test('Errores del servidor: con commandId cierran ESA orden; de una orden vieja, ajenos o sin commandId NO tocan la orden actual; sin respuesta termina por tiempo; el indicador se recupera al enviar otra', { skip, timeout: 90000 }, async t => {
+  const { m } = await setup(t); const { page } = m;
+  await page.evaluate(() => { window.__net.dropAllCommands = true; });             // las órdenes no llegan: solo responde lo que el test inyecta
+  const err = (code, commandId, message) => page.evaluate(e => window.__net.inject(e), { protocolVersion: 1, type: 'error', code, message: message || 'x', ...(commandId ? { commandId } : {}), serverTimestamp: Date.now() });
+  await sendColor(page, '#0A84FF'); const A = await lastCommandId(page);
+  assert.match(await kAcc(page), /^ENVIANDO…/);
+  await err('RATE_LIMITED', A);
+  await waitK(page, /^RECHAZADA: RATE_LIMITED — se enviaron demasiadas órdenes/, 3000);
+  assert.deepEqual(await pendingIds(page), [], 'una orden rechazada deja de estar pendiente (no se reintenta)');
+
+  await sendColor(page, '#34C759'); const B = await lastCommandId(page);               // el indicador SE RECUPERA con la orden nueva
+  assert.match(await kAcc(page), /^ENVIANDO…/);
+  await err('OUT_OF_RANGE', A);                                                        // error tardío de A (ya cerrada)
+  await err('PUBLISH_FAILED', 'otra-orden-ajena-0001');                                // commandId que el panel nunca envió
+  await err('INVALID_JSON');                                                           // sin commandId: no se asocia a ninguna orden
+  await sleep(300);
+  assert.match(await kAcc(page), /^ENVIANDO…/, 'ninguno de esos mensajes cerró ni alteró la orden B');
+  assert.match(await page.$eval('#alerts', n => n.textContent), /INVALID_JSON.*no corresponde a una orden concreta/);
+  assert.equal(await page.evaluate(() => window.DestelloMaster.orders.get(window.DestelloMaster.tracker.ids()[0]).server.phase), 'sending');
+  await err('PUBLISH_FAILED', B, 'el almacenamiento no responde');
+  await waitK(page, /^RECHAZADA: PUBLISH_FAILED — el servidor no pudo publicarla/, 3000);
+
+  await sendColor(page, '#FF3B30'); const C = await lastCommandId(page);               // C no recibe NINGUNA respuesta: termina por tiempo
+  assert.match(await kAcc(page), /^ENVIANDO…/);
+  await waitK(page, /^SIN CONFIRMACIÓN: el servidor no respondió tras 3 intentos/, 15000);
+  assert.deepEqual(await pendingIds(page), []);
+  assert.deepEqual([A, B, C].map(i => i.length > 8), [true, true, true]);
+  assert.match(await page.$eval('#orderLog', n => n.textContent), /rechazada/i);
+  assert.deepEqual(m.errors, []);
 });

@@ -8,7 +8,7 @@
   var PALETTE = ['#FFFFFF', '#FFD400', '#FF9F1C', '#FF3B30', '#34C759', '#00C7BE', '#0A84FF', '#5856D6', '#AF52DE', '#FF2D55', '#7C4DFF', '#000000'];
   var S = {
     op: null, session: null, masterToken: null, ws: null, attempts: 0, reconnectTimer: null, closing: false,
-    color: '#FFD400', effect: 'solid', strobeEnabled: false, maxHz: 3, tracker: DestelloPending.createTracker(), lastAccepted: null, lastStatsVersion: 0, latestVersion: 0, connected: false
+    color: '#FFD400', effect: 'solid', strobeEnabled: false, maxHz: 3, tracker: DestelloPending.createTracker(), orders: DestelloOrders.createOrders(), maxStrobeMs: 30000, lastAccepted: null, lastStatsVersion: 0, latestVersion: 0, connected: false
   };
   try { S.op = JSON.parse(sessionStorage.getItem('ds-op') || 'null'); } catch (e) { S.op = null; }
   if (S.op && S.op.expiresAt < Date.now()) S.op = null;
@@ -155,7 +155,7 @@
     switch (m.type) {
       case 'welcome':
         S.attempts = 0; S.connected = true; pill('status', '● online', 'ok'); $('hConn').textContent = 'conectado'; $('send').disabled = false;
-        S.strobeEnabled = !!m.config.strobeEnabled; S.maxHz = m.config.maxStrobeHz || 3; $('maxHz').textContent = String(S.maxHz); $('hz').max = String(S.maxHz);
+        S.strobeEnabled = !!m.config.strobeEnabled; S.maxHz = m.config.maxStrobeHz || 3; S.maxStrobeMs = m.config.maxStrobeDurationMs || 30000; paintDurationLimit(); $('maxHz').textContent = String(S.maxHz); $('hz').max = String(S.maxHz);
         $('count').textContent = String(m.connected || 0); showState(m.state); paintStrobe();
         S.latestVersion = m.state ? m.state.stateVersion : 0;
         resendAfterReconnect();
@@ -165,56 +165,98 @@
         if (m.health) paintHealth(m.health);
         break;
       case 'ack': onAck(m); break;
-      case 'state': if (m.stateVersion > S.latestVersion) S.latestVersion = m.stateVersion; showState(m); break;
-      case 'stats': paintStats(m); break;
+      case 'state': if (m.stateVersion > S.latestVersion) S.latestVersion = m.stateVersion; S.orders.state(m); showState(m); break;
+      case 'stats': onStats(m); break;
       case 'config': S.strobeEnabled = !!m.strobeEnabled; paintStrobe(); break;
-      case 'error':
-        S.tracker.reject(m.commandId);                                // solo el comando al que se refiere el error (si es uno nuestro)
-        alertBox('bad', m.code + ': ' + m.message, 'cmd'); setTimeout(function () { alertBox('bad', null, 'cmd'); }, 6000); break;
+      case 'error': onServerError(m); break;
       case 'restart': reconnect(Math.max(500, Math.min(8000, m.reconnectAfterMs || 2000))); break;
       default: break;
     }
   }
-  // Un ACK solo confirma el comando con ESE commandId. Duplicados, desconocidos y tardíos se clasifican y no alteran el estado de la pantalla.
+  // Un ACK solo confirma el comando con ESE commandId. Duplicados, desconocidos y tardíos se clasifican y no alteran la orden actual:
+  // cada respuesta actualiza el registro de SU orden (S.orders) y la interfaz muestra únicamente la orden más reciente.
   function onAck(m) {
     var r = S.tracker.ack(m);
-    if (r.kind === 'duplicate' || r.kind === 'unknown') return;
-    if (r.kind === 'late') { alertBox('info', 'Llegó la confirmación tardía de una orden anterior (v' + m.stateVersion + '); la orden actual sigue pendiente.', 'ack'); setTimeout(function () { alertBox('info', null, 'ack'); }, 4000); return; }
+    var rec = S.orders.accepted(m);                      // también corrige una orden ya declarada «sin confirmación» si su ACK llega tarde
+    if (r.kind === 'duplicate' || r.kind === 'unknown') { renderOrder(); return; }
+    if (r.kind === 'late') { alertBox('info', 'Llegó la confirmación tardía de una orden anterior (v' + m.stateVersion + '); la orden actual sigue su curso.', 'ack'); setTimeout(function () { alertBox('info', null, 'ack'); }, 4000); renderOrder(); return; }
     alertBox('warn', null, 'cmd');
     S.lastAccepted = m;
-    var stale = m.duplicate && m.stateVersion < S.latestVersion;     // ya se había aplicado y hay un estado más nuevo: no tocar las estadísticas actuales
-    $('kAccepted').textContent = 'ACEPTADA · v' + m.stateVersion + (m.duplicate ? ' (ya estaba aplicada: no se repite)' : '') + ' · ejecuta en ' + Math.max(0, Math.round(m.executeAt - m.serverTimestamp)) + ' ms';
-    if (stale) return;
-    $('kApplied').textContent = 'esperando confirmaciones…'; $('kOnTime').textContent = '—'; $('kDev').textContent = '—';
-    S.lastStatsVersion = m.stateVersion;
+    renderOrder();
+  }
+  // El servidor respondió `error`. Con commandId válido se cierra SOLO esa orden (rechazada, con código y explicación). Sin commandId no se asocia
+  // a ninguna orden: se avisa al operador y las órdenes pendientes terminan por tiempo (reintentos / tiempo máximo), nunca quedan abiertas.
+  function onServerError(m) {
+    var id = typeof m.commandId === 'string' ? m.commandId : null;
+    S.tracker.reject(id);
+    var rec = id ? S.orders.rejected(id, m.code, m.message) : null;
+    S.unassociatedErrors = (S.unassociatedErrors || 0) + (rec ? 0 : 1);
+    alertBox('bad', m.code + ': ' + DestelloOrders.explain(m.code, m.message) + (id ? '' : ' (no corresponde a una orden concreta)'), 'cmd');
+    setTimeout(function () { alertBox('bad', null, 'cmd'); }, 8000);
+    renderOrder();
+  }
+  function onStats(m) {
+    var rec = S.orders.applied(m);                       // por stateVersion -> solo la orden vinculada a esa versión
+    if (m.connected != null) $('count').textContent = String(m.connected);
+    if (rec && rec === S.orders.current()) paintLateWarning(m);
+    renderOrder();
   }
   function resendAfterReconnect() {
     var r = S.tracker.onReconnect();
-    r.dropped.forEach(function (e) { alertBox('warn', 'Se descartó una orden que no llegó a confirmarse antes de la desconexión (ya era antigua o fue reemplazada por otra más nueva).', 'drop'); setTimeout(function () { alertBox('warn', null, 'drop'); }, 6000); });
-    r.resend.forEach(function (e) { send(e.msg); $('kAccepted').textContent = 'REENVIANDO tras reconexión…'; });
+    r.dropped.forEach(function (e) {
+      if (!e.superseded) S.orders.failed(e.id, 'offline');
+      alertBox('warn', 'Se descartó una orden que no llegó a confirmarse antes de la desconexión (ya era antigua o fue reemplazada por otra más nueva).', 'drop'); setTimeout(function () { alertBox('warn', null, 'drop'); }, 6000);
+    });
+    r.resend.forEach(function (e) { send(e.msg); S.orders.retry(e.id, e.attempts); });
+    renderOrder();
   }
-  // Vencimiento de ACK: se reenvía el MISMO commandId (el servidor es idempotente) y, agotados los intentos, se avisa.
+  // Vencimiento de ACK: se reenvía el MISMO commandId (el servidor es idempotente) y, agotados los intentos (o el tiempo sin conexión), la orden
+  // se declara SIN CONFIRMACIÓN en el indicador principal. S.orders.tick() aplica además el tope absoluto y el plazo de confirmación de dispositivos.
   setInterval(function () {
     var d = S.tracker.due();
-    d.resend.forEach(function (e) { if (S.connected) { send(e.msg); $('kAccepted').textContent = 'SIN CONFIRMACIÓN: reintento ' + (e.attempts - 1) + '…'; } else e.attempts--; });
-    d.failed.forEach(function (e) { alertBox('bad', 'El servidor no confirmó la orden después de ' + e.attempts + ' intentos. Verificá la conexión y volvé a enviarla.', 'cmd'); });
+    d.resend.forEach(function (e) { if (S.connected) { send(e.msg); S.orders.retry(e.id, e.attempts); } else e.attempts--; });
+    d.failed.forEach(function (e) {
+      S.orders.retry(e.id, e.attempts); S.orders.failed(e.id, e.failReason || 'retries');
+      alertBox('bad', 'El servidor no confirmó la orden (' + (e.failReason === 'offline' ? 'sin conexión' : e.attempts + ' intentos') + '). Verificá la conexión y volvé a enviarla.', 'cmd');
+    });
+    S.orders.tick();
+    renderOrder();
   }, 500);
 
-  function showState(st) {
-    if (!st || !st.payload) return;
-    $('kState').textContent = 'v' + st.stateVersion + ' · ' + st.payload.effect + (st.payload.effect === 'off' ? '' : ' · ' + st.payload.color);
+  // ---------------------------------------------------------------- indicadores de la última orden (derivados del registro real de S.orders)
+  var LEVEL_CLASS = { ok: 'st-ok', bad: 'st-bad', warn: 'st-warn', pending: 'st-pending', muted: 'st-muted' };
+  function setStatus(id, d) { var n = $(id); n.textContent = d.text; n.className = LEVEL_CLASS[d.level] || ''; }
+  var EFFECT_LABEL = { solid: 'Fijo', fade: 'Transición', pulse: 'Pulso', strobe: 'Strobe', off: 'Detener' };
+  function renderOrder() {
+    var cur = S.orders.current();
+    if (!cur) { setStatus('kAccepted', { text: '—', level: 'muted' }); setStatus('kApplied', { text: '—', level: 'muted' }); return; }
+    setStatus('kAccepted', S.orders.describeServer(cur));
+    setStatus('kApplied', S.orders.describeDevices(cur));
+    var st = cur.dev.stats;
+    if (st && st.responded) {
+      $('kOnTime').textContent = st.onTimePct + '% dentro de ±' + st.toleranceMs + ' ms · ' + st.late + ' fuera de margen';
+      $('kDev').textContent = 'p50 ' + st.deviationP50Ms + ' ms · p95 ' + st.deviationP95Ms + ' ms · p99 ' + st.deviationP99Ms + ' ms';
+    } else { $('kOnTime').textContent = '—'; $('kDev').textContent = '—'; }
+    var ul = $('orderLog'); ul.textContent = '';
+    S.orders.recent(6).forEach(function (r) {
+      var li = document.createElement('li');
+      var a = document.createElement('span'); a.textContent = new Date(r.createdAt).toLocaleTimeString() + '  ' + (EFFECT_LABEL[r.effect] || r.effect);
+      var b = document.createElement('span'); var sv = S.orders.describeServer(r), dv = S.orders.describeDevices(r);
+      b.textContent = sv.text.split(' · ')[0].split(' (')[0].split(':')[0] + (r.dev.phase === 'idle' || r.dev.phase === 'none' ? '' : ' → ' + dv.text.split(':')[0].split(' (')[0]);
+      b.className = LEVEL_CLASS[sv.level] || '';
+      li.appendChild(a); li.appendChild(b); ul.appendChild(li);
+    });
   }
-  function paintStats(m) {
-    if (m.stateVersion !== S.lastStatsVersion) return;
-    $('count').textContent = String(m.connected);
-    if (!m.responded) { $('kApplied').textContent = 'sin confirmaciones todavía (se reporta una muestra de teléfonos)'; return; }
-    $('kApplied').textContent = m.responded + ' dispositivos confirmaron (muestra)';
-    $('kOnTime').textContent = m.onTimePct + '% dentro de ±' + m.toleranceMs + ' ms · ' + m.late + ' fuera de margen';
-    $('kDev').textContent = 'p50 ' + m.deviationP50Ms + ' ms · p95 ' + m.deviationP95Ms + ' ms · p99 ' + m.deviationP99Ms + ' ms';
+  function paintLateWarning(m) {
     var lateArrivalPct = m.responded ? (m.lateArrival * 100 / m.responded) : 0;
     if (m.responded >= 20 && (m.onTimePct < 90 || lateArrivalPct > 5)) {
       alertBox('warn', 'Las órdenes podrían estar llegando tarde (' + m.onTimePct + '% a tiempo, ' + Math.round(lateArrivalPct) + '% llegaron después de su ejecución). Elegí un margen mayor.', 'late');
     } else alertBox('warn', null, 'late');
+  }
+
+  function showState(st) {
+    if (!st || !st.payload) return;
+    $('kState').textContent = 'v' + st.stateVersion + ' · ' + st.payload.effect + (st.payload.effect === 'off' ? '' : ' · ' + st.payload.color);
   }
   function paintHealth(h) {
     var cls = h.status === 'ok' ? 'ok' : (h.status === 'degraded' ? '' : 'bad');
@@ -232,11 +274,15 @@
   }
 
   // ---------------------------------------------------------------- controles
+  // Los límites del panel deben coincidir con los del servidor (protocolo v1): periodo 600–10000 ms, transición 0–10000 ms, pulso hasta 600 s y strobe
+  // hasta maxStrobeDurationMs (30 s por defecto; llega en el welcome). Un valor fuera de rango se AJUSTA y se avisa, en vez de enviarse para ser rechazado.
+  function durationMaxS() { return S.effect === 'strobe' ? Math.max(1, Math.floor(S.maxStrobeMs / 1000)) : 600; }
+  function paintDurationLimit() { var el = $('durationS'); el.max = String(durationMaxS()); if (Number(el.value) > durationMaxS()) el.value = String(durationMaxS()); }
   function setEffect(e) {
     S.effect = e;
     document.querySelectorAll('[data-effect]').forEach(function (b) { b.classList.toggle('primary', b.getAttribute('data-effect') === e); });
     show('pFade', e === 'solid' || e === 'fade'); show('pColor2', e === 'fade' || e === 'pulse' || e === 'strobe');
-    show('pPeriod', e === 'pulse'); show('pHz', e === 'strobe'); show('pDur', e === 'pulse' || e === 'strobe'); paintStrobe();
+    show('pPeriod', e === 'pulse'); show('pHz', e === 'strobe'); show('pDur', e === 'pulse' || e === 'strobe'); paintStrobe(); paintDurationLimit();
   }
   function selectColor(c, btn) {
     S.color = c; $('custom').value = c.toLowerCase(); $('colorHex').textContent = c;
@@ -251,20 +297,30 @@
   setEffect('solid');
 
   function sendCommand() {
+    var notes = [];
+    function lim(val, min, max, name, unit) {
+      var v = Number(val); if (!isFinite(v)) v = min;
+      var c = Math.min(max, Math.max(min, v)); if (c !== v) notes.push(name + ' ajustado a ' + c + unit + ' (límite permitido ' + min + '–' + max + unit + ')');
+      return c;
+    }
     var p = { effect: S.effect, color: S.color };
-    if (S.effect === 'solid' || S.effect === 'fade') p.fadeMs = Number($('fadeMs').value) || 0;
+    if (S.effect === 'solid' || S.effect === 'fade') p.fadeMs = Math.round(lim($('fadeMs').value, 0, 10000, 'Duración de transición', ' ms'));
     if (S.effect === 'fade' || S.effect === 'pulse' || S.effect === 'strobe') p.color2 = $('color2').value.toUpperCase();
-    if (S.effect === 'pulse') { p.periodMs = Number($('periodMs').value) || 2000; p.durationMs = Math.round((Number($('durationS').value) || 0) * 1000); }
-    if (S.effect === 'strobe') { p.hz = Math.min(S.maxHz, Number($('hz').value) || 2); p.durationMs = Math.max(500, Math.round((Number($('durationS').value) || 10) * 1000)); }
+    if (S.effect === 'pulse') { p.periodMs = Math.round(lim($('periodMs').value, 600, 10000, 'Período', ' ms')); p.durationMs = Math.round(lim($('durationS').value, 0, 600, 'Duración', ' s') * 1000); }
+    if (S.effect === 'strobe') { p.hz = lim($('hz').value || 2, 0.5, S.maxHz, 'Frecuencia', ' Hz'); p.durationMs = Math.round(lim($('durationS').value || 10, 0.5, S.maxStrobeMs / 1000, 'Duración', ' s') * 1000); }
     var msg = { protocolVersion: PROTOCOL, type: 'command', commandId: newId(), leadMs: Number($('lead').value) || 1500, payload: p };
+    if (notes.length) { alertBox('info', notes.join(' · '), 'adjust'); setTimeout(function () { alertBox('info', null, 'adjust'); }, 6000); }
     track(msg, 'command');
   }
   // Registra el comando (el anterior queda "superado") y lo envía; si no hay conexión queda en cola y se reenvía al reconectar si sigue siendo reciente.
   function track(msg, kind) {
     var online = Boolean(S.ws && S.ws.readyState === 1);
     S.tracker.add(msg, { kind: kind, sent: online });
-    if (!online) { alertBox('bad', 'Sin conexión con el servidor: la orden se enviará al reconectar (si no pasan más de 15 s).', 'cmd'); return false; }
-    send(msg); $('kAccepted').textContent = 'ENVIANDO…'; return true;
+    S.orders.create({ id: msg.commandId, kind: kind, effect: msg.payload ? msg.payload.effect : 'off' });
+    if (!online) alertBox('bad', 'Sin conexión con el servidor: la orden se enviará al reconectar (si no pasan más de 15 s).', 'cmd');
+    else send(msg);
+    renderOrder();
+    return online;
   }
   function emergencyStop() {
     var ok = track({ protocolVersion: PROTOCOL, type: 'stop', commandId: newId() }, 'stop');
@@ -301,7 +357,7 @@
   }, 10000);
 
   // Gancho para pruebas de navegador (solo lectura del estado interno).
-  window.DestelloMaster = { tracker: S.tracker, state: S };
+  window.DestelloMaster = { tracker: S.tracker, orders: S.orders, state: S };
 
   if (S.op) enter();
 })();

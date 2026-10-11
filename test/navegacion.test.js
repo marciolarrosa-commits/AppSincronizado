@@ -154,3 +154,12 @@ test('configuración de producción: errores de arranque claros y PUBLIC_BASE_UR
   assert.equal(loadConfig({ ...ok, PUBLIC_BASE_URL: 'https://appsincronizado.onrender.com/' }).publicBaseUrl, 'https://appsincronizado.onrender.com');
   assert.equal(loadConfig({ ...ok, PUBLIC_BASE_URL: 'https://appsincronizado.onrender.com' }).allowNoOrigin, false);
 });
+
+test('verificación del despliegue: la versión activa figura en /api/admin/status (solo operador) y los archivos nuevos del panel se publican', async t => {
+  const srv = await startServer(); t.after(srv.stop);
+  const pkg = require('../package.json');
+  assert.equal((await http(srv.base, 'GET', '/api/admin/status')).status, 401, 'sin operador no se revela la versión');
+  const st = await http(srv.base, 'GET', '/api/admin/status', { token: await login(srv.base) });
+  assert.equal(st.json.version, pkg.version);
+  assert.equal((await get(srv.base, '/js/orders.js')).status, 200, 'orders.js (ciclo de vida de órdenes) está publicado');
+});
