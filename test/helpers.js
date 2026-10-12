@@ -5,18 +5,26 @@ const { createApp } = require('../src/app');
 
 const PASSWORD = 'password-de-prueba-123';
 
+// Puertos que fetch (undici) se niega a usar por estándar («bad port»): si el SO asigna uno de ellos al puerto 0, la prueba fallaría al preparar el servidor
+// (pasó de forma intermitente con ordenes-servidor). Se reintenta con otro puerto; no tiene relación con lo que se prueba.
+const FETCH_BAD_PORTS = new Set([1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179,
+  389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080]);
+
 async function startServer(overrides = {}, deps = {}) {
-  const logs = [];
-  const app = createApp({
-    port: 0, host: '127.0.0.1', masterPassword: PASSWORD, masterPasswordGenerated: false,
-    tokenSecret: 'secreto-de-prueba-0123456789abcdef', allowNoOrigin: true, logLevel: 'error',
-    heartbeatMs: 3000, helloTimeoutMs: 1500, shutdownGraceMs: 4000, shutdownSpreadMs: 300,
-    presenceIntervalMs: 200, presenceTtlMs: 3000, defaultLeadMs: 400, minLeadMs: 100,
-    ...overrides
-  }, { logSink: l => logs.push(l), ...deps });
-  const addr = await app.start();
-  const base = `http://127.0.0.1:${addr.port}`;
-  return { app, base, wsUrl: `ws://127.0.0.1:${addr.port}/ws`, port: addr.port, logs, stop: () => app.shutdown('test') };
+  for (let attempt = 0; ; attempt++) {
+    const logs = [];
+    const app = createApp({
+      port: 0, host: '127.0.0.1', masterPassword: PASSWORD, masterPasswordGenerated: false,
+      tokenSecret: 'secreto-de-prueba-0123456789abcdef', allowNoOrigin: true, logLevel: 'error',
+      heartbeatMs: 3000, helloTimeoutMs: 1500, shutdownGraceMs: 4000, shutdownSpreadMs: 300,
+      presenceIntervalMs: 200, presenceTtlMs: 3000, defaultLeadMs: 400, minLeadMs: 100,
+      ...overrides
+    }, { logSink: l => logs.push(l), ...deps });
+    const addr = await app.start();
+    if (FETCH_BAD_PORTS.has(addr.port) && !overrides.port && attempt < 20) { await app.shutdown('puerto-no-apto'); continue; }
+    const base = `http://127.0.0.1:${addr.port}`;
+    return { app, base, wsUrl: `ws://127.0.0.1:${addr.port}/ws`, port: addr.port, logs, stop: () => app.shutdown('test') };
+  }
 }
 
 async function http(base, method, path, { body, token, headers } = {}) {

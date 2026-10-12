@@ -21,7 +21,28 @@ Fuentes: render.com/docs/websocket, /free, /scaling, /key-value, /compute-plans.
 
 Cada proceso de la app usa **2 conexiones** a Redis (comandos + suscripción). Con K instancias/procesos: 2·K conexiones (el Key Value gratuito admite 50).
 
-## Variables de entorno en Render
+## Variables de entorno en Render (V3.5.0 — qué hay que configurar y qué cambia al desplegar)
+
+| Variable | ¿Qué hacer? |
+|---|---|
+| `NODE_ENV` | `production`. |
+| `MASTER_PASSWORD` | Aleatoria y larga (el Blueprint la genera con `generateValue`). Mínimo 12 caracteres y ≥ 6 distintos. |
+| `TOKEN_SECRET` | **Nueva, recomendada:** secreto de firma de tokens aleatorio de ≥ 32 bytes (hex o base64). El Blueprint la genera con `generateValue: true`. En un servicio **existente** (no gestionado por Blueprint) hay que **añadirla a mano** en *Environment*: `openssl rand -base64 48`. Si no existe, se deriva de `MASTER_PASSWORD` con scrypt (el arranque avisa). |
+| `PUBLIC_BASE_URL` | **Ahora obligatoria en producción.** Si no la defines, en Render se toma `RENDER_EXTERNAL_URL` (la define Render; **no verificado en el entorno real**: confirma en los logs de arranque el mensaje `public_base_url_from_render` y que el QR sale con la URL correcta). Con dominio propio, defínela con ese dominio. |
+| `ALLOWED_ORIGINS` | Opcional: orígenes https adicionales separados por comas, sin comodines. No dejes valores de ejemplo. |
+| `REDIS_URL` | La enlaza el Blueprint al Key Value. Sin ella = memoria, **una sola instancia**. |
+| `SHUTDOWN_GRACE_MS` | `25000`. |
+
+**Qué cambia al desplegar esta versión (hay que saberlo antes):**
+1. **Todos los tokens anteriores dejan de valer** (cambia el formato y el secreto de firma): el operador debe volver a ingresar en `/master` y los paneles Master conectados reconectan con un token nuevo. No desplegar durante un evento en curso.
+2. Si se define `TOKEN_SECRET` por primera vez más adelante, ocurre lo mismo (otra rotación). Rotar `MASTER_PASSWORD` o `TOKEN_SECRET` invalida todos los tokens (operador y Master).
+3. La vigencia por defecto del token de operador baja de 12 h a **8 h**.
+4. Un `ALLOWED_ORIGINS` o `PUBLIC_BASE_URL` inválidos ahora **impiden el arranque** con un mensaje claro en los logs (no hay arranque a medias).
+5. `/healthz` ya no informa el tiempo de actividad (sigue siendo `200`; Render lo sigue sondeando igual).
+
+**Límites del plan gratuito (siguen vigentes; esta versión no los cambia):** el servicio gratuito (0,1 CPU, 512 MB, una instancia, se duerme tras 15 min) y el Key Value gratuito (25 MB, 50 conexiones, **sin persistencia**: un reinicio borra sesiones, revocaciones de tokens y contadores de límites) no son aptos para un evento de decenas de miles de personas. Con varias instancias hace falta Redis de un plan que persista y aguante la carga. **No se cambió ningún plan ni se tocó el entorno real.**
+
+**Redis/Key Value:** la conexión interna de Render no exige contraseña ni TLS por defecto; la seguridad depende de que el servicio **no** tenga acceso externo (`ipAllowList: []`). Esto no se puede comprobar desde el repositorio: revisar en el panel de Render que el Key Value no está expuesto, y usar `REDIS_URL` con credenciales o `rediss://` si el plan lo ofrece. Quien tenga acceso a Redis puede leer sesiones y **publicar estados a todos los teléfonos**.
 
 Ver `CONFIGURACION.md`. Mínimo: `NODE_ENV=production`, `MASTER_PASSWORD` (el Blueprint la genera), `REDIS_URL` (la enlaza el Blueprint al Key Value), `PUBLIC_BASE_URL`, `SHUTDOWN_GRACE_MS=25000`.
 La contraseña generada se lee en el panel de Render (Environment). **No va en el código ni en Git** (`.env` está en `.gitignore`; `render.yaml` solo pide generarla).

@@ -1,5 +1,7 @@
 # Informe de seguridad (V3.1)
 
+> Auditoría posterior (V3.4.2, revisión de código): hallazgos en `AUDITORIA_SEGURIDAD_V3.4.md`; su remediación (V3.5.0) está al final de este documento y en `INFORME_V3.5.0.md`.
+
 Alcance: código de este repositorio. **No** se hizo una prueba de intrusión externa ni se auditó la infraestructura de Render.
 
 ## Controles implementados y cómo se verifican
@@ -76,3 +78,53 @@ Para el evento, vigilar `ws_rejected_*` y `http_rate_limited`: cualquier valor d
 * Deshabilitada, `/flash` y `/?s=` responden `403` con `cache-control: no-store`; la comprobación ocurre **antes** de cualquier `304`, así que una copia en caché no la salta. La pantalla del participante V3 (`mode=remote`) no depende del interruptor.
 * Límite conocido: el interruptor protege las direcciones de entrada, no el archivo (`flash.html` también contiene el cliente de V3). La app Flash no usa el servidor ni maneja datos sensibles.
 * Se dejaron de publicar los `*.artifact.json` (metadatos del editor) que antes se servían como estáticos.
+
+## Remediación de la auditoría de ciberseguridad (V3.5.0)
+
+Informe completo con comandos y resultados: `INFORME_V3.5.0.md`. Hallazgos de partida: `AUDITORIA_SEGURIDAD_V3.4.md`. **Una revisión de código y pruebas automáticas no sustituyen una prueba de intrusión ni la verificación de la configuración real de Render.**
+
+### Autenticación, sesiones y tokens
+
+* **Formato del token** (`src/auth.js`): `{v, r, iat, exp, jti, pf, …}` firmado con HMAC-SHA256. Se verifica: estructura (dos partes base64url, ≤ 600 caracteres), firma en tiempo constante, versión, rol (`op`/`ma`), enteros `iat`/`exp`, **vencimiento exacto**, `iat` no más de 60 s en el futuro (tolerancia entre relojes de instancias), **vida máxima 7 días**, `jti` con formato, huella de contraseña y, según el rol, `sid`/`ep` (Master) o generación (operador). No hay elevación de privilegios: el rol sale del token firmado, un token de Master no sirve como operador ni al revés, y tocar un solo carácter rompe la firma (`test/auth-seguridad.test.js`).
+* **Secreto de firma**: `TOKEN_SECRET`, si se define, debe ser hexadecimal o base64/base64url de **≥ 32 bytes** y pasa comprobaciones de variedad, entropía, repeticiones y secuencias; el arranque falla con un mensaje que **no repite el valor**. Sin él, se deriva de `MASTER_PASSWORD` con **scrypt** (N = 2¹⁵, ≈ 0,1 s y 32 MB por intento; antes HKDF, microsegundos): un token filtrado ya no permite adivinar una contraseña débil a velocidad de CPU. Sigue siendo más débil que un secreto aleatorio: en producción se recomienda definir `TOKEN_SECRET` (el arranque avisa). Límite: las comprobaciones son heurísticas y no prueban aleatoriedad.
+* **Revocación y rotación — estrategia única:**
+
+  | Acción | Efecto |
+  |---|---|
+  | `POST /api/master/logout` | Revoca **ese** token de operador (`jti`): inmediato en la instancia que lo procesa, ≤ 5 s en las demás (Redis; sondeo cada 5 s). |
+  | `POST /api/master/logout {"all":true}` | Sube la «generación» de operador: todo token emitido antes deja de valer. El login lee la generación vigente antes de emitir (no nace invalidado). |
+  | `POST /api/sessions/:id/revoke` | Rota el `epoch` de la sesión: los tokens de Master anteriores dejan de valer (inmediato, se comprueba en cada orden). |
+  | Rotar `MASTER_PASSWORD` | Invalida **todos** los tokens (operador y Master), también con `TOKEN_SECRET` fijo: cada token lleva una huella de la contraseña. |
+  | Rotar `TOKEN_SECRET` | Invalida todos los tokens (cambia la firma). |
+
+  El panel (`/master`) usa «Salir» (revoca en el servidor) y «Salir en todos». Vigencias: operador 8 h (antes 12 h), Master 12 h; tope de 24 h en la configuración.
+* **Login**: solo `application/json` (`415` en otro caso: una petición «simple» entre sitios no llega a procesarse), `403` con `Sec-Fetch-Site: cross-site`, **duración mínima igual para éxito y fallo** (sin canal de tiempo), límite por IP **compartido entre instancias** y, ante un intento distribuido, demora de toda respuesta de login (no bloqueo).
+
+### Límites de frecuencia: una instancia o varias
+
+* **Compartidos (Redis/Valkey, operación atómica `INCR`+`PEXPIRE`, sin carreras)**: API/administración por IP, login por IP, fallos de login globales, uniones WebSocket fallidas por IP y consultas a sesiones inexistentes. Con `RATE_LIMIT_BACKEND=store` (predeterminado) el límite vale para **todo el servicio**; con `local` cada instancia cuenta por separado y el límite efectivo se **multiplica por el número de instancias** (probado: con 2 instancias y límite 4, 8 intentos pasan).
+* **Locales a propósito**: estáticos (sin límite por IP por defecto), tasa de conexiones por IP (umbral de 60 000/min: solo frena inundaciones absurdas), conexiones sin hello por IP y cupos por conexión (token bucket): son de volumen muy alto o por conexión; llevarlos a Redis añadiría una consulta por conexión sin cambiar la protección.
+* **Redis caído**: cada limitador usa su contador local (el límite **sigue vigente**, ahora por instancia), con tiempo máximo de 150 ms por consulta y un «disyuntor» de 5 s para no acumular peticiones; se cuenta (`ratelimit_backend_errors`), se registra (un aviso por periodo) y `/api/admin/status → security.rateLimit.degraded` lo indica. El servicio no se cae ni se bloquea. Probado con un Redis real detenido a mitad de la prueba.
+* **NAT del estadio**: el vencimiento del `hello` **ya no cuenta** como unión fallida y las consultas de estado inexistente tienen límite propio; antes ambos podían bloquear las conexiones nuevas de toda una IP compartida. Sigue siendo posible que una persona detrás del mismo NAT provoque el bloqueo de **nuevas** uniones adivinando códigos (120/min): es el costo de proteger la fuerza bruta de códigos, que solo da acceso como participante; si preocupa, subir `BAD_JOIN_PER_MIN_PER_IP`. Las IP se normalizan (IPv4 mapeada → IPv4; IPv6 → /64).
+* **Una instancia en memoria** (sin Redis): todo es local y equivale a lo anterior. **Escalar a varias** exige Redis (ya era así) y entonces los límites compartidos pasan a valer globalmente.
+
+### Producción en Render y Redis
+
+* **URL canónica obligatoria** (`PUBLIC_BASE_URL`, o `RENDER_EXTERNAL_URL` en Render): el QR, la CSP y el Origin dejan de depender del encabezado `Host`. En producción el Origin de un WebSocket solo se acepta si coincide (esquema + host + puerto) con la URL canónica o `ALLOWED_ORIGINS` (sin comodines; valores inválidos impiden el arranque).
+* Redirección `http`→`https` (308, según `X-Forwarded-Proto`, con salud exenta), HSTS en producción, `Cross-Origin-Resource-Policy: same-origin`; `/healthz` sin tiempo de actividad.
+* **Redis como frontera de confianza**: lo recibido por pub/sub se valida (forma de estado) antes de llegar a los teléfonos; un registro de sesión corrupto equivale a «no existe» sin excepciones; protocolo **RESP2 fijado** explícitamente (ioredis 6 usa RESP3 por defecto); un `hello` a una sesión inexistente ya **no crea sala ni se suscribe** al canal.
+* **Lo que no se puede verificar desde el repositorio**: que el Key Value de Render no esté expuesto, su autenticación/ACL/TLS reales, `RENDER_EXTERNAL_URL` en el entorno real, el comportamiento con Valkey (solo se probó Redis 5.0.14 local) y la protección volumétrica. Quien llegue a Redis puede **publicar estados a todos los teléfonos** y leer sesiones. No compartir un Redis entre entornos sin un `REDIS_PREFIX` distinto.
+
+### Registros y empaquetado
+
+* Los logs redactan por **nombre de campo y por valor** (tokens, `Bearer`, `Basic`, credenciales en URLs), neutralizan caracteres de control (sin falsificar líneas) y registran siempre una IP **válida y normalizada** (una cabecera `X-Forwarded-For` hostil no entra). `x-request-id` solo se refleja con formato válido.
+* **ZIP de releases** (`tools/release.js`): versionado por Git + lista de raíces permitidas + lista de denegación (`.env*`, `.npmrc`, claves, certificados, volcados, logs, copias, comprimidos, metadatos locales) + **escaneo de contenido** (claves privadas y tokens conocidos → aborta sin escribir nada). Límites: patrones conocidos, no garantía; revisar el diff antes de publicar. Probado con archivos señuelo.
+
+### Riesgos residuales (no resueltos o no verificables)
+
+1. **Contraseña única compartida** del operador (sin usuarios ni MFA) y tokens en `sessionStorage` del navegador (un XSS los robaría; el panel no tiene sinks de HTML).
+2. **DoS volumétrico** (L3/L4/L7) y **agotamiento del tope de conexiones** (`MAX_CONNECTIONS`) por clientes con el código público: depende de CDN/WAF y de dimensionar capacidad (`MAX_CONN_PER_IP` ajustado a la topología). No se probó con carga.
+3. **Revocación entre instancias con retraso de hasta 5 s** y, **sin Redis persistente** (plan gratuito), un reinicio del Key Value borra las revocaciones: un token cerrado podría volver a valer hasta su vencimiento (máx. 8 h).
+4. La telemetría de participantes (`applied`, `ping.rtt`) sigue siendo autodeclarada.
+5. `script-src blob:` y `style-src-attr 'unsafe-inline'` siguen presentes; el despliegue automático por commit (`autoDeployTrigger: commit`) hace que quien escriba en el repositorio pueda cambiar producción.
+6. Valkey y el entorno real de Render **no se probaron**.

@@ -11,6 +11,10 @@ if (cluster.isPrimary) {
   try {
     const cfg = require('./src/config').loadConfig(process.env);
     if (cfg.production && !cfg.redisUrl) console.warn(JSON.stringify({ level: 'warn', msg: 'single_instance_memory_state', detail: 'Sin REDIS_URL el estado vive en memoria: usar UNA sola instancia y un solo proceso (no escalar horizontalmente).' }));
+    // Avisos de configuración (nunca incluyen valores): ver docs/SEGURIDAD.md y docs/CONFIGURACION.md
+    if (cfg.production && cfg.tokenSecretSource === 'derived') console.warn(JSON.stringify({ level: 'warn', msg: 'token_secret_derived_from_password', detail: 'TOKEN_SECRET no está definido: el secreto de firma se deriva de MASTER_PASSWORD (scrypt). Definir un TOKEN_SECRET aleatorio de ≥ 32 bytes es más seguro.' }));
+    if (cfg.production && cfg.publicBaseUrlSource === 'RENDER_EXTERNAL_URL') console.warn(JSON.stringify({ level: 'info', msg: 'public_base_url_from_render', detail: 'PUBLIC_BASE_URL no está definido: se usa RENDER_EXTERNAL_URL. Con dominio propio definir PUBLIC_BASE_URL.' }));
+    if (cfg.production && cfg.redisUrl && !/^rediss:/i.test(cfg.redisUrl) && !/\/\/[^@/]*@/.test(cfg.redisUrl)) console.warn(JSON.stringify({ level: 'warn', msg: 'redis_without_auth_or_tls', detail: 'REDIS_URL sin credenciales ni TLS: confiar solo en la red privada del proveedor. Usar contraseña/ACL o rediss:// si el servicio lo ofrece.' }));
   } catch (e) {
     console.error(JSON.stringify({ level: 'fatal', msg: 'startup_config_invalid', error: e.message }));
     process.exit(1);

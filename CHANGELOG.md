@@ -6,6 +6,17 @@ Formato: `MAYOR.MENOR.PARCHE` — **mayor** = rompe el protocolo o el formato de
 
 <!-- release:next -->
 
+## [3.5.0] — 2026-10-12
+
+- Auditoría y remediación de ciberseguridad (informe en docs/INFORME_V3.5.0.md): ioredis 5.11.1 → 6.0.0 con protocolo RESP2 fijado; límites de frecuencia compartidos entre instancias (Redis, atómicos, con respaldo local si Redis falla); tokens con reclamaciones estrictas, revocación (POST /api/master/logout, «Salir en todos») y huella de contraseña; TOKEN_SECRET validado y derivación scrypt; login con application/json, Sec-Fetch-Site y tiempo igual; URL pública canónica obligatoria en producción y origen sin Host; redirección https; datos de Redis validados; registros depurados por valor; empaquetado de releases con lista permitida, denegación y escaneo de secretos.
+- CAMBIOS AL DESPLEGAR: todos los tokens anteriores dejan de valer (el operador vuelve a ingresar); PUBLIC_BASE_URL (o RENDER_EXTERNAL_URL en Render) es obligatoria en producción; TOKEN_SECRET recomendado; vigencia del token de operador 8 h. Ver docs/DESPLIEGUE_RENDER.md.
+- Pruebas: 224/224 con Redis 5.0.14 real y 41/41 en Chrome; 0 pruebas eliminadas (205 → 265 test, 1 180 → 1 517 aserciones); npm audit 0. No verificado: Valkey, entorno real de Render, carga, prueba de intrusión.
+
+## [3.4.3] — 2026-10-11
+
+- Auditoría de ciberseguridad por revisión de código: docs/AUDITORIA_SEGURIDAD_V3.4.md con 10 hallazgos priorizados (S-01 a S-10), enlazada desde README y SEGURIDAD.md.
+- Solo documentación: no se cambió código ni comportamiento y no se hicieron pruebas de intrusión. Verificación: sintaxis OK, npm audit 0 vulnerabilidades, 17/17 en test/release y test/navegacion (batería completa no repetida).
+
 ## [3.4.2] — 2026-10-11
 
 - Versionado de cada modificación: CHANGELOG.md con el historial 3.1.0–3.4.1, herramienta tools/release.js (sube versión, registra la nota y genera el ZIP verificado) y docs/VERSIONADO.md.

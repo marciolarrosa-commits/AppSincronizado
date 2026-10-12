@@ -148,7 +148,9 @@ test('los metadatos del editor (*.artifact.json) no se publican y las rutas desc
 test('configuración de producción: errores de arranque claros y PUBLIC_BASE_URL coherente', () => {
   assert.throws(() => loadConfig({ NODE_ENV: 'production' }), /Falta MASTER_PASSWORD/);
   assert.throws(() => loadConfig({ NODE_ENV: 'production', MASTER_PASSWORD: 'corta' }), /al menos 12/);
-  const ok = { NODE_ENV: 'production', MASTER_PASSWORD: 'x'.repeat(12) };
+  // V3.5.0: la contraseña «válida» ya no puede ser un carácter repetido (la regla de 12 caracteres no basta); el resto de las comprobaciones originales sigue igual
+  const ok = { NODE_ENV: 'production', MASTER_PASSWORD: 'Xk9f-Qw3z-Lm82-Pa7d' };
+  assert.throws(() => loadConfig({ NODE_ENV: 'production', MASTER_PASSWORD: 'x'.repeat(12), PUBLIC_BASE_URL: 'https://appsincronizado.onrender.com' }), /demasiado simple/);
   assert.throws(() => loadConfig({ ...ok, PUBLIC_BASE_URL: 'http://appsincronizado.onrender.com' }), /https/);
   assert.throws(() => loadConfig({ ...ok, PUBLIC_BASE_URL: 'https://appsincronizado.onrender.com/ruta' }), /PUBLIC_BASE_URL inválida/);
   assert.equal(loadConfig({ ...ok, PUBLIC_BASE_URL: 'https://appsincronizado.onrender.com/' }).publicBaseUrl, 'https://appsincronizado.onrender.com');
@@ -163,7 +165,6 @@ test('verificación del despliegue: la versión activa figura en /api/admin/stat
   assert.equal(st.json.version, pkg.version);
   assert.equal((await get(srv.base, '/js/orders.js')).status, 200, 'orders.js (ciclo de vida de órdenes) está publicado');
 });
-<<<<<<< HEAD
 
 test('/colores (calibración de color) se publica sin redirecciones, con su script autorizado por hash y sin depender de sesión ni de Flash', async t => {
   const srv = await startServer(); t.after(srv.stop);
@@ -175,5 +176,3 @@ test('/colores (calibración de color) se publica sin redirecciones, con su scri
     assert.ok(!/script-src[^;]*unsafe-inline/.test(r.headers.get('content-security-policy')));
   }
 });
-=======
->>>>>>> f955c88a82162806e95869d026fe464925a7a04f

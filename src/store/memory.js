@@ -9,6 +9,8 @@ function createMemoryStore(config) {
   const presence = new Map();     // id -> Map<instanceId, {count, exp}>
   const acks = new Map();         // `${id}:${ver}` -> {h, exp}
   const settings = new Map();     // ajustes del operador (sin vencimiento mientras viva el proceso)
+  const rates = new Map();        // clave -> { start, n, windowMs }: contadores de los límites de frecuencia
+  const revoked = new Map();      // jti de tokens de operador revocados -> vencimiento (s)
   const ttl = config.sessionTtlS * 1000;
   let sweeper = null;
 
@@ -27,6 +29,7 @@ function createMemoryStore(config) {
         const now = Date.now();
         for (const [id, s] of sessions) if (s.expiresAt < now) sessions.delete(id);
         for (const [k, a] of acks) if (a.exp < now) acks.delete(k);
+        for (const [k, r] of rates) if (now - r.start >= r.windowMs) rates.delete(k);
       }, 30000);
       sweeper.unref();
     },
@@ -35,6 +38,19 @@ function createMemoryStore(config) {
     async time() { return Date.now(); },                       // hora del almacenamiento (una sola instancia: la propia)
     async getSetting(key) { return settings.has(key) ? settings.get(key) : null; },
     async setSetting(key, value) { settings.set(key, String(value)); },
+    async incrSetting(key) { const n = (Number(settings.get(key)) || 0) + 1; settings.set(key, String(n)); return n; },
+
+    // Límites de frecuencia (misma interfaz que Redis): con una sola instancia en memoria equivalen al limitador local.
+    async rateHit(key, windowMs) {
+      const t = Date.now(); let e = rates.get(key);
+      if (!e || t - e.start >= windowMs) { e = { start: t, n: 0, windowMs }; rates.set(key, e); }
+      return ++e.n;
+    },
+    async rateCount(key) { const e = rates.get(key); return e && Date.now() - e.start < e.windowMs ? e.n : 0; },
+
+    async revokeToken(jti, expSec) { revoked.set(jti, expSec); const now = Math.floor(Date.now() / 1000) - 60; for (const [k, v] of revoked) if (v < now) revoked.delete(k); },
+    async listRevoked(nowSec) { const out = []; for (const [jti, exp] of revoked) if (exp >= nowSec) out.push({ jti, exp }); return out; },
+    async sessionExists(id) { return Boolean(live(id)); },
 
     async createSession(id) {
       if (live(id)) return null;

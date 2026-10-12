@@ -41,7 +41,7 @@
   }
   function logout(expired) {
     S.op = null; try { sessionStorage.removeItem('ds-op'); sessionStorage.removeItem('ds-sid'); } catch (e) { /* bloqueado */ }
-    teardown(); show('loginView', true); show('setupView', false); show('control', false); show('logout', false); show('flashCard', false);
+    teardown(); show('loginView', true); show('setupView', false); show('control', false); show('logout', false); show('logoutAll', false); show('flashCard', false);
     pill('status', '● sin sesión'); $('loginError').textContent = expired ? 'La sesión de operador venció. Ingresá de nuevo.' : '';
   }
   function teardown() {
@@ -52,7 +52,7 @@
 
   // ---------------------------------------------------------------- vistas
   function enter() {
-    show('loginView', false); show('logout', true); flashLoad();
+    show('loginView', false); show('logout', true); show('logoutAll', true); flashLoad();
     var sid = null; try { sid = sessionStorage.getItem('ds-sid'); } catch (e) { /* bloqueado */ }
     if (sid) return resume(sid).catch(function () { showSetup(); });
     showSetup();
@@ -386,7 +386,17 @@
   $('refresh').addEventListener('click', showSetup);
   $('copy').addEventListener('click', function () { if (navigator.clipboard) navigator.clipboard.writeText($('url').textContent); });
   $('open').addEventListener('click', function () { window.open($('url').textContent, '_blank', 'noopener'); });
-  $('logout').addEventListener('click', function () { logout(false); });
+  // «Salir» revoca el token EN EL SERVIDOR (no basta con olvidarlo en el navegador): si alguien lo hubiera copiado, deja de valer. Es un mejor esfuerzo: si la petición
+  // falla (sin red) igualmente se cierra la sesión local, y el token vence solo.
+  function serverLogout(all) {
+    var tok = S.op && S.op.token; if (!tok) return Promise.resolve();
+    return fetch('/api/master/logout', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + tok }, body: JSON.stringify({ all: all }), cache: 'no-store' }).catch(function () { /* sin red */ });
+  }
+  $('logout').addEventListener('click', function () { serverLogout(false); logout(false); });
+  $('logoutAll').addEventListener('click', function () {
+    if (!window.confirm('¿Cerrar la sesión de operador en TODOS los dispositivos y navegadores? Tendrás que volver a ingresar con la contraseña.')) return;
+    serverLogout(true); logout(false);
+  });
   $('flashToggle').addEventListener('click', flashToggle);
   $('flashNewCode').addEventListener('click', function () { flashNewCode(); flashPaint(); });
   $('flashCopy').addEventListener('click', function () { if (navigator.clipboard) navigator.clipboard.writeText($('flashUrl').textContent); });

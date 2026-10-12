@@ -1,7 +1,27 @@
 'use strict';
 // Store Redis/Valkey: estado compartido, publicación por sesión y presencia entre varias instancias.
 // Solo usa comandos básicos (HASH, EVAL, PUBLISH/SUBSCRIBE, EXPIRE, ZSET) -> compatible con Redis 5+, Valkey y Render Key Value.
-const { initialState, summarizeAcks } = require('./common');
+const { initialState, summarizeAcks, isStateShape, isBusMessage } = require('./common');
+
+// Contador de ventana fija para los límites de frecuencia COMPARTIDOS entre instancias. Atómico: INCR + PEXPIRE en un solo paso del servidor, así que
+// ninguna petición concurrente puede saltarse el límite. La ventana se ancla al primer golpe (no depende de los relojes de las instancias).
+// El PTTL < 0 repara una clave que hubiera quedado sin vencimiento. Solo comandos básicos (Redis 5+, Valkey).
+const RATE_LUA = `
+local c = redis.call('INCR', KEYS[1])
+if c == 1 or redis.call('PTTL', KEYS[1]) < 0 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
+return c
+`;
+
+/**
+ * Opciones de conexión de ioredis. `protocol: 2` (RESP2) es EXPLÍCITO: ioredis 6 usa RESP3 por defecto, que cambia la semántica de pub/sub y de
+ * las respuestas; el sistema se probó y opera con RESP2 (igual que ioredis 5), válido en Redis 5+ y Valkey. No cambiarlo sin repetir las pruebas de Redis.
+ */
+function redisOptions() {
+  return {
+    lazyConnect: true, maxRetriesPerRequest: 2, enableOfflineQueue: true, connectTimeout: 5000, protocol: 2,
+    retryStrategy: times => Math.min(2000, 100 * 2 ** Math.min(times, 5)) + Math.floor(Math.random() * 200)
+  };
+}
 
 // Versión monotónica + guardado + publicación atómicos, con IDEMPOTENCIA por commandId sobre una ventana acotada:
 //   KEYS[1] sesión (hash) · KEYS[2] canal · KEYS[3] hash commandId -> "versión|executeAt|serverTimestamp" · KEYS[4] zset commandId (score = versión)
@@ -50,12 +70,11 @@ function createRedisStore(config, logger) {
   const Redis = require('ioredis');
   const p = config.redisPrefix;
   const ttlMs = config.sessionTtlS * 1000;
-  const opts = {
-    lazyConnect: true, maxRetriesPerRequest: 2, enableOfflineQueue: true, connectTimeout: 5000,
-    retryStrategy: times => Math.min(2000, 100 * 2 ** Math.min(times, 5)) + Math.floor(Math.random() * 200)
-  };
+  const opts = redisOptions();
   const cmd = new Redis(config.redisUrl, opts);
   const sub = new Redis(config.redisUrl, opts);
+  cmd.defineCommand('rateHit', { numberOfKeys: 1, lua: RATE_LUA });
+  let lastBadBusAt = 0;
   const handlers = new Map();   // id -> Set<fn>
   let lastError = null;
   let everReady = false;
@@ -74,7 +93,12 @@ function createRedisStore(config, logger) {
     const id = channel.slice((p + 'ch:').length);
     const set = handlers.get(id);
     if (!set) return;
-    let msg; try { msg = JSON.parse(raw); } catch { return; }
+    let msg; try { msg = JSON.parse(raw); } catch { msg = null; }
+    // El canal es una frontera de confianza: solo se entregan mensajes con forma de estado. Lo demás se descarta y se registra (sin volcar el contenido).
+    if (!isBusMessage(msg)) {
+      const t = Date.now(); if (t - lastBadBusAt > 10000) { lastBadBusAt = t; logger.warn('redis_bus_message_invalid', { sessionId: id.slice(0, 12), bytes: String(raw).length }); }
+      return;
+    }
     for (const fn of set) { try { fn(msg); } catch { /* aislado */ } }
   });
 
@@ -89,7 +113,11 @@ function createRedisStore(config, logger) {
 
   function view(h) {
     if (!h || !h.id || !h.state || !h.createdAt) return null;       // registro incompleto (creación interrumpida): equivale a "no existe"
-    return { id: h.id, createdAt: Number(h.createdAt), epoch: Number(h.epoch), strobeEnabled: h.strobe === '1', state: JSON.parse(h.state) };
+    let state; try { state = JSON.parse(h.state); } catch { state = null; }
+    const epoch = Number(h.epoch), createdAt = Number(h.createdAt);
+    // Registro corrupto (valor alterado o escritura parcial): equivale a "no existe" en vez de lanzar una excepción en cada unión/orden.
+    if (!isStateShape(state) || !Number.isSafeInteger(epoch) || epoch < 1 || !Number.isFinite(createdAt)) { logger.warn('redis_session_record_invalid', { sessionId: String(h.id).slice(0, 12) }); return null; }
+    return { id: h.id, createdAt, epoch, strobeEnabled: h.strobe === '1', state };
   }
 
   return {
@@ -112,6 +140,20 @@ function createRedisStore(config, logger) {
     async time() { const t = await cmd.time(); return Number(t[0]) * 1000 + Number(t[1]) / 1000; },
     async getSetting(key) { return cmd.get(p + 'set:' + key); },
     async setSetting(key, value) { await cmd.set(p + 'set:' + key, String(value)); },
+    async incrSetting(key) { return Number(await cmd.incr(p + 'set:' + key)); },       // contador atómico compartido (p. ej. generación de tokens de operador)
+
+    // Límites de frecuencia compartidos entre instancias (ver src/ratelimit.js). `rateHit` cuenta y devuelve el total de la ventana; `rateCount` solo lee.
+    async rateHit(key, windowMs) { return Number(await cmd.rateHit(p + 'rl:' + key, String(windowMs))); },
+    async rateCount(key) { return Number(await cmd.get(p + 'rl:' + key)) || 0; },
+
+    // Tokens de operador revocados (jti -> vencimiento en segundos). Cada entrada vence con el propio token, así que el conjunto no crece sin cota.
+    async revokeToken(jti, expSec) { await cmd.multi().zadd(p + 'revoked', expSec, jti).zremrangebyscore(p + 'revoked', '-inf', Math.floor(Date.now() / 1000) - 60).exec(); },
+    async listRevoked(nowSec) {
+      const rows = await cmd.zrangebyscore(p + 'revoked', nowSec, '+inf', 'WITHSCORES', 'LIMIT', 0, 5000); const out = [];
+      for (let i = 0; i < rows.length; i += 2) out.push({ jti: rows[i], exp: Number(rows[i + 1]) });
+      return out;
+    },
+    async sessionExists(id) { return (await cmd.exists(kS(id))) === 1; },
 
     async createSession(id) {
       const now = Date.now();
@@ -174,8 +216,9 @@ function createRedisStore(config, logger) {
     async presenceTotal(id) {
       const h = await cmd.hgetall(kPres(id)); const now = Date.now(); let total = 0; const stale = [];
       for (const [inst, v] of Object.entries(h)) {
-        const [c, exp] = v.split(':');
-        if (Number(exp) < now) stale.push(inst); else total += Number(c);
+        const [c, exp] = String(v).split(':'); const n = Number(c);
+        if (!(Number(exp) >= now)) stale.push(inst);                       // vencido o ilegible
+        else if (Number.isFinite(n) && n >= 0) total += n;
       }
       if (stale.length) cmd.hdel(kPres(id), ...stale).catch(() => {});
       return total;
@@ -191,4 +234,4 @@ function createRedisStore(config, logger) {
   };
 }
 
-module.exports = { createRedisStore };
+module.exports = { createRedisStore, redisOptions };

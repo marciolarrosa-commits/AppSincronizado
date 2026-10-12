@@ -197,7 +197,9 @@ function createHub({ config, store, metrics, logger, auth, getHealth, clock }) {
     connCount++; metrics.inc('ws_connections_total'); metrics.setGauge('connections_total', connCount);
     { const c = ipConns.get(ip) || { pre: 0, total: 0 }; c.pre++; c.total++; ipConns.set(ip, c); conn.counted = true; conn.preCounted = true; }
     buckets[conn.bucket].add(conn);
-    conn.helloTimer = setTimeout(() => { metrics.inc('ws_hello_timeouts'); conn.onBadJoin && conn.onBadJoin(); closeConn(conn, CLOSE.HELLO_TIMEOUT, 'HELLO_TIMEOUT'); }, config.helloTimeoutMs);
+    // El vencimiento del hello NO cuenta como unión fallida: en una red saturada teléfonos legítimos tardan, y sumarlo al límite por IP bloquearía a todo el NAT
+    // que la comparte (realimentación). Se cuenta aparte (ws_hello_timeouts); lo limita la capa de conexiones sin hello por IP.
+    conn.helloTimer = setTimeout(() => { metrics.inc('ws_hello_timeouts'); closeConn(conn, CLOSE.HELLO_TIMEOUT, 'HELLO_TIMEOUT'); }, config.helloTimeoutMs);
 
     ws.on('message', (data, isBinary) => onMessage(conn, data, isBinary));
     ws.on('pong', () => { conn.alive = true; });
@@ -322,6 +324,12 @@ function createHub({ config, store, metrics, logger, auth, getHealth, clock }) {
 
   async function join(conn, h) {
     if (draining) return reject(conn, 'DRAINING', CLOSE.TRY_LATER, 'Servidor reiniciando');
+    // Una sesión que no existe se rechaza ANTES de crear la sala y suscribirse al canal: un hello a un código inventado no debe costar una suscripción/baja en
+    // Redis. Solo hace falta comprobarlo cuando no hay ya una sala local (si la hay, la sesión existe o se verifica abajo como siempre).
+    if (!rooms.has(h.sessionId) && !(await store.sessionExists(h.sessionId))) {
+      metrics.inc('bad_join'); conn.onBadJoin && conn.onBadJoin();
+      return reject(conn, 'SESSION_NOT_FOUND', CLOSE.NOT_FOUND, 'Sesión inexistente o vencida');
+    }
     const room = await ensureRoom(h.sessionId);
     if (conn.closed) return maybeDropRoom(room);
     const sess = await store.getSession(h.sessionId);

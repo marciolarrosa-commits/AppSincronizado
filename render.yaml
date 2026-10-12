@@ -12,12 +12,17 @@ services:
     buildCommand: npm ci --omit=dev
     startCommand: npm start
     healthCheckPath: /healthz          # liveness; /readyz es la disponibilidad (503 si el almacenamiento falla o se está reiniciando)
-    autoDeployTrigger: commit
+    autoDeployTrigger: commit          # cada push a la rama conectada DESPLIEGA: quien pueda escribir en el repositorio puede cambiar producción. Para un evento conviene «off» (despliegue manual) y no desplegar durante él.
     envVars:
       - key: NODE_ENV
         value: production
       - key: MASTER_PASSWORD           # Render genera un valor aleatorio; se consulta en el panel (Environment) y es la clave de /master
         generateValue: true
+      - key: TOKEN_SECRET              # secreto de FIRMA de tokens, independiente de la contraseña (≥ 32 bytes aleatorios; generateValue de Render cumple). Sin él se deriva de
+        generateValue: true            # MASTER_PASSWORD (más débil si la contraseña la elige una persona). Rotarlo invalida TODOS los tokens (operadores y Masters).
+      # URL pública CANÓNICA (enlace del QR, CSP y validación de Origin): PUBLIC_BASE_URL (solo origen https, p. ej. la URL del servicio o su dominio propio). Si no se define en
+      # producción se usa RENDER_EXTERNAL_URL, que Render proporciona. Con un dominio propio DEBE definirse PUBLIC_BASE_URL (si no, los WebSockets desde ese dominio se rechazan).
+      # ALLOWED_ORIGINS (opcional): orígenes https adicionales separados por comas; sin comodines. No se incluyen valores de ejemplo a propósito.
       - key: SHUTDOWN_GRACE_MS         # Render envía SIGTERM y espera 30 s por defecto
         value: "25000"
       - key: REDIS_URL                 # estado compartido (necesario para >1 instancia). Quitar este bloque para usar memoria (una sola instancia)
@@ -29,5 +34,5 @@ services:
   - type: keyvalue
     name: destello-keyvalue
     plan: free                         # 25 MB / 50 conexiones / sin persistencia. Para un evento: plan pago (ver docs)
-    ipAllowList: []                    # solo red interna de Render
-    maxmemoryPolicy: noeviction
+    ipAllowList: []                    # solo red interna de Render: NO abrir al exterior. La conexión interna no exige TLS; si el plan ofrece contraseña/ACL o TLS, usar un REDIS_URL con
+    maxmemoryPolicy: noeviction        # usuario y clave incluidos en la URL, o con esquema rediss (ioredis habilita TLS solo con rediss). Lo no verificable desde el repositorio está en docs/SEGURIDAD.md.

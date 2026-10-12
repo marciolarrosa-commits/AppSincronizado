@@ -11,10 +11,7 @@ Todas las respuestas llevan `x-content-type-options`, `x-frame-options: DENY`, `
 | `GET/HEAD /?s=CODIGO&mode=remote` | público (participante) | **Pantalla del participante** (`public/flash.html`, cliente remoto V3). **Es el formato de los QR de V3; se conserva.** | Siempre disponible, no depende del interruptor Flash. |
 | `GET/HEAD /?mode=remote` | público | Igual, sin código (app instalada / PWA: pide el código). `start_url` del manifiesto. | Siempre disponible. |
 | `GET/HEAD /master` (y `/master/`) | público (la página); la autenticación es del API | **Panel del operador** (`public/master.html`). | Sin sesión de operador solo muestra el formulario de ingreso. |
-<<<<<<< HEAD
 | `GET/HEAD /colores` (y `/colores/`, `/colores.html`) | público | **Calibración de color** (`public/colores.html`): escala de blanco atenuado, amarillos, pares blanco/amarillo, campo completo y entorno del teléfono. Autónoma: no abre WebSocket ni usa sesión. | Ver `COLOR.md`. |
-=======
->>>>>>> f955c88a82162806e95869d026fe464925a7a04f
 | `GET/HEAD /flash` (y `/flash/`, `/flash.html`) | público, **solo si el operador habilitó Flash** | **App Flash anterior** (micrófono + linterna), misma página `flash.html`. Con `?s=CODIGO` abre directamente la vista de activación. | Deshabilitada (por defecto): `403` con la página `flash-disabled.html`, `cache-control: no-store`. |
 | `GET/HEAD /?s=CODIGO` (sin `mode=remote`) | público, igual que `/flash` | Enlaces/QR **antiguos** de la app Flash. | Deshabilitada: `403`. |
 | `GET/HEAD /js/*.js`, `/icons/*.png`, `/favicon.svg`, `/manifest.webmanifest`, `/flash-disabled.html` | público | Archivos estáticos de `public/` (gzip + ETag; `cache-control: no-cache`, se revalidan). | `404` si no existen; `400` si la ruta tiene `..` o `\0`. Los `*.artifact.json` del editor **no** se publican. |
@@ -25,7 +22,7 @@ Todas las respuestas llevan `x-content-type-options`, `x-frame-options: DENY`, `
 
 | Método y ruta | Auth | Respuesta | Notas |
 |---|---|---|---|
-| `GET/HEAD /healthz` | ninguna | `200 {"ok":true,"status":"alive","uptimeS":N}` | Liveness; es el `healthCheckPath` de Render. Exento del límite de peticiones. |
+| `GET/HEAD /healthz` | ninguna | `200 {"ok":true,"status":"alive"}` | Liveness; es el `healthCheckPath` de Render. Exento del límite de peticiones y de la redirección a https. **V3.5.0:** ya no informa el tiempo de actividad (eso está en `/api/admin/status`, solo operador). |
 | `GET /readyz` | ninguna | `200 {"ready":true}` o `503 {"ready":false}` | `503` si el almacenamiento no responde, la instancia se está apagando o superó `MAX_CONNECTIONS`. Exento del límite. |
 | `GET /metrics` | `Authorization: Bearer <METRICS_TOKEN>` **o** token de operador | `200 text/plain` (formato Prometheus) | `401 {"error":"UNAUTHORIZED"}` sin token válido. |
 
@@ -33,7 +30,8 @@ Todas las respuestas llevan `x-content-type-options`, `x-frame-options: DENY`, `
 
 | Método y ruta | Auth | Cuerpo → respuesta | Errores |
 |---|---|---|---|
-| `POST /api/master/login` | ninguna (límite propio `LOGIN_RATE_PER_MIN`=8/min/IP) | `{ "password": "…" }` → `200 {operatorToken, expiresAt}` | `401` contraseña incorrecta (espera 250 ms); `429` demasiados intentos; `400` JSON inválido; `413` cuerpo > 4 KB. |
+| `POST /api/master/login` | ninguna (límite propio `LOGIN_RATE_PER_MIN`=8/min/IP, **compartido entre instancias**) | `{ "password": "…" }` → `200 {operatorToken, expiresAt}` | `401` contraseña incorrecta; `429` demasiados intentos; `400` JSON inválido; `413` cuerpo > 4 KB; **`415` si el `Content-Type` no es `application/json`** (V3.5.0: una petición «simple» entre sitios no puede ejecutar acciones); `403` con `Sec-Fetch-Site: cross-site`. **Éxito y fallo tardan lo mismo (≥ 250 ms)**; con muchos fallos entre todas las IP toda respuesta se demora 1,75 s (no se bloquea). |
+| `POST /api/master/logout` | operador | `{}` → revoca el token usado; `{ "all": true }` → además invalida todos los tokens de operador emitidos antes. → `200 {ok, all}` | `401`; `400 INVALID_BODY` (`all` debe ser booleano). Efecto inmediato en la instancia que lo procesa y ≤ 5 s en las demás (Redis). **V3.5.0.** No afecta a los tokens de Master de sesión (los gobierna el `epoch`: `POST /api/sessions/:id/revoke`). |
 | `POST /api/sessions` | operador (Bearer) | `{}` o `{ "sessionId": "ABC234" }` (re-crear con el mismo código) → `201 {sessionId, code, joinUrl, masterToken, masterTokenExpiresAt, state, strobeEnabled, wsPath:"/ws"}` | `401`; `400 INVALID_SESSION`; `409 SESSION_EXISTS`; `429 TOO_MANY_SESSIONS`; `503 CODE_COLLISION`. `joinUrl` = `<base>/?s=CODIGO&mode=remote`. |
 | `GET /api/sessions` | operador | → `200 {sessions:[{id, createdAt}]}` (hasta 50) | `401`. |
 | `POST /api/sessions/:id/master-token` | operador | → `200 {sessionId, joinUrl, masterToken, masterTokenExpiresAt, state, strobeEnabled}` | `401`; `404 SESSION_NOT_FOUND`. |

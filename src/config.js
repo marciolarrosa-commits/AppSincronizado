@@ -2,6 +2,7 @@
 // Toda la configuración sale de variables de entorno (ver docs/CONFIGURACION.md). Nada de secretos en el repositorio.
 const crypto = require('crypto');
 const os = require('os');
+const { validateTokenSecret, deriveSecretFromPassword } = require('./auth');
 
 function num(env, name, def, { min = -Infinity, max = Infinity } = {}) {
   const raw = env[name];
@@ -34,25 +35,50 @@ function loadConfig(env = process.env, overrides = {}) {
     masterPasswordGenerated = true;
   }
   if (production && masterPassword.length < 12) throw new Error('MASTER_PASSWORD debe tener al menos 12 caracteres en producción.');
+  if (production && new Set(masterPassword).size < 6) throw new Error('MASTER_PASSWORD es demasiado simple en producción (muy pocos caracteres distintos): use una contraseña larga y aleatoria.');
 
-  // El secreto de firma de tokens se deriva de la contraseña del Master si no se define aparte: así todas las
-  // instancias comparten el mismo secreto sin configuración extra, y rotar la contraseña invalida los tokens.
-  const tokenSecret = env.TOKEN_SECRET ||
-    Buffer.from(crypto.hkdfSync('sha256', masterPassword, 'destello-sync', 'token-secret-v1', 32));
+  // Secreto de firma de tokens. Con TOKEN_SECRET explícito se EXIGE material aleatorio de ≥ 32 bytes (ver auth.validateTokenSecret; el error no incluye el valor).
+  // Sin él se deriva de MASTER_PASSWORD con scrypt (lento): todas las instancias obtienen el mismo secreto sin configuración extra, pero un token filtrado
+  // permitiría intentar adivinar una contraseña DÉBIL sin conexión → en producción se recomienda definir TOKEN_SECRET (server.js lo avisa). Los valores de
+  // prueba (overrides.tokenSecret) saltan este cálculo: scrypt es costoso y no hace falta repetirlo en cada arranque de prueba.
+  let tokenSecret = overrides.tokenSecret; let tokenSecretSource = 'override';
+  if (tokenSecret === undefined) {
+    if (env.TOKEN_SECRET) { tokenSecret = validateTokenSecret(env.TOKEN_SECRET); tokenSecretSource = 'env'; }
+    else { tokenSecret = deriveSecretFromPassword(masterPassword); tokenSecretSource = 'derived'; }
+  }
 
-  const publicBaseUrl = (env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
-  if (publicBaseUrl && !/^https?:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?$/.test(publicBaseUrl)) throw new Error('PUBLIC_BASE_URL inválida: debe ser solo origen, p. ej. https://appsincronizado.onrender.com (sin ruta ni espacios).');
+  // URL pública CANÓNICA: se usa para el enlace del QR, la CSP y la validación de Origin; en producción es obligatoria para no depender del encabezado Host
+  // (controlado por quien hace la petición). PUBLIC_BASE_URL manda; si falta y estamos en Render, se usa RENDER_EXTERNAL_URL (la define Render).
+  const ORIGIN_RE = /^https?:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?$/;
+  const explicitBase = (env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+  const renderBase = (env.RENDER_EXTERNAL_URL || '').replace(/\/+$/, '');
+  const publicBaseUrl = explicitBase || (production ? renderBase : '');
+  const publicBaseUrlSource = explicitBase ? 'PUBLIC_BASE_URL' : (publicBaseUrl ? 'RENDER_EXTERNAL_URL' : 'none');
+  if (publicBaseUrl && !ORIGIN_RE.test(publicBaseUrl)) throw new Error('PUBLIC_BASE_URL inválida: debe ser solo origen, p. ej. https://mi-servicio.onrender.com (sin ruta ni espacios).');
   if (production && publicBaseUrl && !publicBaseUrl.startsWith('https://')) throw new Error('PUBLIC_BASE_URL debe usar https:// en producción (los teléfonos necesitan WSS).');
+  if (production && !publicBaseUrl) throw new Error('Falta PUBLIC_BASE_URL (obligatoria con NODE_ENV=production): la URL pública https del servicio, solo el origen (p. ej. https://mi-servicio.onrender.com). En Render se toma RENDER_EXTERNAL_URL si no se define.');
+  const allowedOrigins = list(env, 'ALLOWED_ORIGINS');
+  for (const o of allowedOrigins) {
+    if (o === '*' || o === 'null' || !ORIGIN_RE.test(o)) throw new Error('ALLOWED_ORIGINS contiene un origen no válido (sin comodines ni rutas; formato https://dominio[:puerto]).');
+    if (production && !o.startsWith('https://') && !/^http:\/\/(localhost|127\.0\.0\.1)(:|$)/.test(o)) throw new Error('ALLOWED_ORIGINS debe usar https:// en producción.');
+  }
+
+  const trustProxyHops = num(env, 'TRUST_PROXY_HOPS', onRender ? 1 : 0, { min: 0, max: 5 });
 
   const cfg = {
     production,
     port: num(env, 'PORT', 10000, { min: 0, max: 65535 }),
     host: env.HOST || '0.0.0.0',
     listenBacklog: num(env, 'LISTEN_BACKLOG', 4096, { min: 128 }),   // cola de aceptación: clave ante reconexiones masivas
-    publicBaseUrl,
-    allowedOrigins: list(env, 'ALLOWED_ORIGINS'),
+    publicBaseUrl, publicBaseUrlSource,
+    allowedOrigins,
     allowNoOrigin: bool(env, 'ALLOW_NO_ORIGIN', !production),
-    trustProxyHops: num(env, 'TRUST_PROXY_HOPS', onRender ? 1 : 0, { min: 0, max: 5 }),
+    // En producción el Origin de un WebSocket solo se acepta si es la URL canónica o está en ALLOWED_ORIGINS; fuera de producción también si coincide con el
+    // Host de la petición (comodidad en desarrollo/pruebas: el navegador no permite falsificar Origin, pero Host sí lo controla quien hace la petición).
+    originFromHost: !production,
+    trustProxyHops,
+    // Redirección http -> https según X-Forwarded-Proto (solo con proxy de confianza). Los endpoints de salud quedan exentos (los sondea la plataforma).
+    httpsRedirect: bool(env, 'FORCE_HTTPS', production && trustProxyHops > 0),
     instanceId: env.INSTANCE_ID || `${os.hostname()}-${process.pid}-${crypto.randomBytes(3).toString('hex')}`,
     logLevel: env.LOG_LEVEL || 'info',
     redisUrl: env.REDIS_URL || '',
@@ -70,9 +96,11 @@ function loadConfig(env = process.env, overrides = {}) {
 
     masterPassword,
     masterPasswordGenerated,
-    tokenSecret,
-    operatorTokenTtlS: num(env, 'OPERATOR_TOKEN_TTL_S', 12 * 3600, { min: 60 }),
-    masterTokenTtlS: num(env, 'MASTER_TOKEN_TTL_S', 12 * 3600, { min: 60 }),
+    tokenSecret, tokenSecretSource,
+    // Vigencia de los tokens: operador 8 h (un turno de trabajo; hay cierre de sesión con revocación en el servidor) y Master 12 h (igual que la sesión).
+    // Tope de 24 h aunque la configuración pida más.
+    operatorTokenTtlS: num(env, 'OPERATOR_TOKEN_TTL_S', 8 * 3600, { min: 60, max: 24 * 3600 }),
+    masterTokenTtlS: num(env, 'MASTER_TOKEN_TTL_S', 12 * 3600, { min: 60, max: 24 * 3600 }),
     metricsToken: env.METRICS_TOKEN || '',
 
     sessionTtlS: num(env, 'SESSION_TTL_S', 12 * 3600, { min: 60 }),
@@ -112,6 +140,13 @@ function loadConfig(env = process.env, overrides = {}) {
     // corresponde a la plataforma (Render/CDN). Se puede activar con HTTP_STATIC_RATE_PER_MIN.
     httpStaticPerMin: num(env, 'HTTP_STATIC_RATE_PER_MIN', 0, { min: 0 }),
     loginPerMin: num(env, 'LOGIN_RATE_PER_MIN', 8, { min: 1 }),
+    // Intentos de login FALLIDOS de todas las IP juntas por minuto: por encima se aplica una demora creciente (no un bloqueo: el operador legítimo no queda fuera).
+    loginGlobalFailPerMin: num(env, 'LOGIN_GLOBAL_FAIL_PER_MIN', 60, { min: 5 }),
+    // Consultas públicas de /api/sessions/:id/status a sesiones inexistentes por IP/min (aparte del límite de uniones fallidas por WebSocket).
+    statusMissPerMin: num(env, 'STATUS_MISS_PER_MIN', 30, { min: 1 }),
+    // 'store' (predeterminado): los límites de API/login/uniones fallidas se cuentan en el almacenamiento compartido (Redis/Valkey) y valen para TODAS las instancias;
+    // sin Redis equivale a memoria local. 'local': siempre por proceso (el límite efectivo se multiplica por el número de instancias).
+    rateLimitBackend: env.RATE_LIMIT_BACKEND === 'local' ? 'local' : 'store',
     // Límites POR CAPAS contra abuso sin castigar al público legítimo detrás de NAT (operadoras móviles / Wi-Fi del estadio: miles de teléfonos
     // comparten pocas IP públicas). Ver docs/SEGURIDAD.md ("Límites por IP y NAT"):
     //  1) tope global de la instancia (MAX_CONNECTIONS) -> protege la capacidad, no depende de la IP;

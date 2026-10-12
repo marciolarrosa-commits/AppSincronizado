@@ -6,19 +6,20 @@ Todo sale de variables de entorno (`src/config.js`). **Ningún secreto está en 
 
 | Variable | Descripción |
 |---|---|
-| `MASTER_PASSWORD` | Contraseña del operador para `/master` (≥ 12 caracteres). Si falta, **el servidor no arranca**. En desarrollo (sin `NODE_ENV=production`) se genera una temporal y se imprime una vez. |
+| `MASTER_PASSWORD` | Contraseña del operador para `/master` (≥ 12 caracteres y al menos 6 caracteres distintos; **V3.5.0**). Si falta o es demasiado simple, **el servidor no arranca**. En desarrollo (sin `NODE_ENV=production`) se genera una temporal y se imprime una vez. |
+| `PUBLIC_BASE_URL` | **V3.5.0: obligatoria.** URL pública https del servicio, **solo el origen** (p. ej. `https://mi-servicio.onrender.com`, sin ruta ni barra final). Si no se define y el servicio corre en Render, se usa `RENDER_EXTERNAL_URL` (que define Render) y el arranque lo registra. Con un **dominio propio** hay que definirla (si no, los WebSockets desde ese dominio se rechazan). Sin ninguna de las dos el servidor no arranca. |
 
 ## Seguridad y acceso
 
 | Variable | Defecto | Descripción |
 |---|---|---|
-| `TOKEN_SECRET` | derivado de `MASTER_PASSWORD` (HKDF) | Secreto HMAC de los tokens. Todas las instancias deben compartirlo (derivarlo de la contraseña lo logra sin configuración extra). Cambiar la contraseña invalida los tokens. |
-| `OPERATOR_TOKEN_TTL_S` | 43200 (12 h) | Vigencia del token de operador. |
-| `MASTER_TOKEN_TTL_S` | 43200 | Vigencia del token de Master de una sesión. |
-| `ALLOWED_ORIGINS` | (vacío) | Orígenes extra permitidos para WebSocket/CORS (lista separada por comas). El mismo host y `PUBLIC_BASE_URL` siempre se permiten. |
+| `TOKEN_SECRET` | derivado de `MASTER_PASSWORD` con **scrypt** (V3.5.0; antes HKDF, rápido) | Secreto HMAC de los tokens. **Recomendado definirlo en producción**: ≥ 32 bytes aleatorios en **hexadecimal (≥ 64 caracteres) o base64/base64url (≥ 43)**, p. ej. `openssl rand -base64 48`. Si se define se **valida al arrancar** (el servidor no arranca si es corto, repetitivo, secuencial o texto libre; el mensaje nunca repite el valor). Es una comprobación heurística: no prueba aleatoriedad (un secreto aleatorio legítimo se rechaza ≈ 1 de cada 25 000; basta regenerarlo). Todas las instancias deben compartirlo. **Rotarlo invalida todos los tokens.** |
+| `OPERATOR_TOKEN_TTL_S` | 28800 (**8 h**; antes 12 h) | Vigencia del token de operador (tope 24 h). Hay cierre de sesión con revocación en el servidor (`POST /api/master/logout`). |
+| `MASTER_TOKEN_TTL_S` | 43200 (12 h) | Vigencia del token de Master de una sesión (tope 24 h). Se revoca rotando el `epoch` de la sesión. |
+| `ALLOWED_ORIGINS` | (vacío) | Orígenes extra permitidos para WebSocket/CORS (lista separada por comas). **V3.5.0:** solo `https://dominio[:puerto]` (sin comodines, sin `null`, sin rutas; en producción `http://` solo para `localhost`); un valor inválido impide el arranque. En producción el Origin de un WebSocket se acepta **solo** si coincide (esquema + host + puerto) con `PUBLIC_BASE_URL` o está en esta lista: el encabezado `Host` ya no sirve de referencia (fuera de producción sí, por comodidad de desarrollo). |
 | `ALLOW_NO_ORIGIN` | `false` en producción, `true` en desarrollo | Permitir WebSocket sin cabecera `Origin` (herramientas no-navegador). |
-| `PUBLIC_BASE_URL` | derivado de la petición | URL pública usada en el QR y para CSP/Origin. Recomendado fijarla, p. ej. `https://appsincronizado.onrender.com`. **Se valida al arrancar**: solo origen (sin ruta), y con `https://` en producción; si no, el servidor no arranca. |
-| `TRUST_PROXY_HOPS` | 1 en Render (`RENDER` definido), 0 en otro caso | Saltos de proxy de confianza para leer la IP real de `X-Forwarded-For`. |
+| `TRUST_PROXY_HOPS` | 1 en Render (`RENDER` definido), 0 en otro caso | Saltos de proxy de confianza para leer la IP real de `X-Forwarded-For` (entrada n-ésima **desde la derecha**). Con un CDN delante de Render hay que **subirlo a 2**; demasiado bajo agrupa a todos los usuarios en las IP del CDN y demasiado alto permite fijar la IP con una cabecera falsa. Las IP se normalizan (IPv4 mapeada → IPv4; IPv6 → prefijo /64). |
+| `FORCE_HTTPS` | `true` en producción con proxy de confianza | Redirige `http` → `https` (308 a la URL canónica) según `X-Forwarded-Proto`. `/healthz` y `/readyz` quedan exentos. |
 | `METRICS_TOKEN` | (vacío) | Token Bearer para `/metrics` (el token de operador también sirve). |
 
 ## Estado compartido / varias instancias
@@ -66,7 +67,10 @@ Todo sale de variables de entorno (`src/config.js`). **Ningún secreto está en 
 | `MASTER_COMMANDS_PER_SEC` / `MASTER_COMMAND_BURST` | 5 / 10 | Órdenes del Master (`stop` no cuenta). |
 | `PUBLIC_MSG_PER_SEC` / `PUBLIC_MSG_BURST` | 5 / 30 | Mensajes de un participante; 20 infracciones → cierre 4429. |
 | `HTTP_RATE_PER_MIN` | 600 | Peticiones a la API/administración por IP (no incluye páginas estáticas). |
-| `LOGIN_RATE_PER_MIN` | 8 | Intentos de login por IP. |
+| `LOGIN_RATE_PER_MIN` | 8 | Intentos de login por IP (**compartido entre instancias** con Redis; V3.5.0). |
+| `LOGIN_GLOBAL_FAIL_PER_MIN` | 60 | Fallos de login de TODAS las IP juntas por minuto; por encima se **demora** toda respuesta de login (1,75 s, también la correcta) en vez de bloquear: frena un intento distribuido sin dejar fuera al operador. |
+| `STATUS_MISS_PER_MIN` | 30 | Consultas públicas a `/api/sessions/:id/status` de sesiones inexistentes por IP/min (límite propio; ya no cuenta contra las uniones WebSocket del NAT). |
+| `RATE_LIMIT_BACKEND` | `store` | `store`: los límites de API, login, uniones fallidas y consultas de estado se cuentan en Redis/Valkey y valen para **todas** las instancias (sin Redis = memoria, igual que local). `local`: siempre por proceso (el límite efectivo se **multiplica por el número de instancias**). Ante un fallo de Redis cada instancia sigue limitando en local (ver `SEGURIDAD.md`). |
 | `WS_CONNECT_PER_MIN_PER_IP` | 60000 | Upgrades WebSocket por IP (capa 4, muy holgada). Ver "Límites por IP y NAT" en SEGURIDAD.md. |
 | `BAD_JOIN_PER_MIN_PER_IP` | 120 | Fallos por IP antes de bloquearla un minuto (capa 3). |
 

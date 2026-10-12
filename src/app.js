@@ -15,7 +15,8 @@ const { createAuth } = require('./auth');
 const { createStore } = require('./store');
 const { createSessionService, SessionError } = require('./sessions');
 const { createHub } = require('./hub');
-const { KeyedLimiter } = require('./ratelimit');
+const net = require('net');
+const { KeyedLimiter, SharedLimiter } = require('./ratelimit');
 const { SESSION_RE } = require('./protocol');
 
 const PUBLIC_DIR = path.resolve(__dirname, '..', 'public');
@@ -76,6 +77,30 @@ function csp(entry, wsOrigins) {
   ].join('; ');
 }
 
+// ---------------------------------------------------------------------------------------------- dirección IP del cliente
+/**
+ * Clave de limitación para una dirección IP (o null si no es una IP válida): IPv4 tal cual; IPv4 mapeada en IPv6 (::ffff:a.b.c.d) como IPv4; IPv6 agrupada por
+ * su prefijo /64, porque un abonado IPv6 dispone de un /64 entero: limitar por dirección completa dejaría rotar direcciones y saltarse todos los límites.
+ */
+function normalizeIp(raw) {
+  let ip = String(raw || '').trim();
+  if (!ip || ip.length > 64) return null;
+  const zone = ip.indexOf('%'); if (zone >= 0) ip = ip.slice(0, zone);
+  if (/^::ffff:/i.test(ip) && net.isIPv4(ip.slice(7))) return ip.slice(7);
+  const v = net.isIP(ip);
+  if (v === 4) return ip;
+  if (v !== 6) return null;
+  const parts = ip.toLowerCase().split('::');
+  const head = parts[0] ? parts[0].split(':') : []; const tail = parts.length > 1 && parts[1] ? parts[1].split(':') : [];
+  const full = parts.length > 1 ? [...head, ...new Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail] : head;
+  return full.slice(0, 4).map(h => (parseInt(h || '0', 16) || 0).toString(16)).join(':') + '::/64';
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const sha256 = s => crypto.createHash('sha256').update(String(s)).digest();
+const LOGIN_MIN_MS = 250;          // duración mínima de TODA respuesta de login (éxito o fallo): sin diferencia de tiempo que delate el resultado
+const LOGIN_TARPIT_MS = 1750;      // con ataque distribuido en curso (muchos fallos entre todas las IP) toda respuesta de login se demora más; nadie queda bloqueado
+
 // ---------------------------------------------------------------------------------------------- aplicación
 function createApp(userConfig = {}, deps = {}) {
   const config = deps.config || loadConfig(process.env, userConfig);
@@ -86,12 +111,19 @@ function createApp(userConfig = {}, deps = {}) {
   const sessions = createSessionService({ config, store, auth });
   const statics = loadStatic();
 
-  const httpLimiter = new KeyedLimiter(config.httpPerMin);
+  // Límites COMPARTIDOS (valen para todas las instancias vía Redis/Valkey; ante un fallo del almacenamiento, respaldo local sin caída): API/administración,
+  // login (por IP y fallos globales), uniones fallidas por WebSocket y consultas de estado a sesiones inexistentes. Los de volumen muy alto y por conexión
+  // (estáticos, tasa de conexiones por IP, cupo de mensajes) siguen siendo locales a propósito: ver docs/SEGURIDAD.md («Una instancia o varias»).
+  const rlStore = config.rateLimitBackend === 'store' ? store : null;
+  const shared = (name, max) => new SharedLimiter({ name, max, store: rlStore, metrics, logger });
+  const httpLimiter = shared('http', config.httpPerMin);
   const staticLimiter = config.httpStaticPerMin > 0 ? new KeyedLimiter(config.httpStaticPerMin) : null;
-  const loginLimiter = new KeyedLimiter(config.loginPerMin);
+  const loginLimiter = shared('login', config.loginPerMin);
+  const loginFailLimiter = shared('loginfail', config.loginGlobalFailPerMin);
+  const statusMissLimiter = shared('statusmiss', config.statusMissPerMin);
   const wsConnLimiter = new KeyedLimiter(config.wsConnectPerMinPerIp);
-  const badJoinLimiter = new KeyedLimiter(config.badJoinPerMinPerIp);
-  const sweeper = setInterval(() => { for (const l of [httpLimiter, staticLimiter, loginLimiter, wsConnLimiter, badJoinLimiter]) if (l) l.sweep(); }, 60000);
+  const badJoinLimiter = shared('badjoin', config.badJoinPerMinPerIp);
+  const sweeper = setInterval(() => { for (const l of [httpLimiter, staticLimiter, loginLimiter, loginFailLimiter, statusMissLimiter, wsConnLimiter, badJoinLimiter]) if (l) l.sweep(); }, 60000);
   sweeper.unref();
 
   let flashEnabled = Boolean(config.flashDefaultEnabled);     // acceso a la app Flash anterior (/flash); lo cambia el operador desde /master
@@ -100,10 +132,18 @@ function createApp(userConfig = {}, deps = {}) {
   const startedAt = Date.now();
   let shuttingDown = false;
 
+  // Revocaciones de tokens de operador compartidas entre instancias (cierre de sesión): se sincronizan cada 5 s con el sondeo del almacenamiento;
+  // en la instancia que procesa el cierre de sesión el efecto es inmediato.
+  async function refreshSecurityState() {
+    const g = await store.getSetting('opGen'); if (g !== null && g !== undefined) auth.setMinGeneration(Number(g));
+    auth.syncRevoked(await store.listRevoked(Math.floor(Date.now() / 1000)));
+  }
+
   async function pollStore() {
     try {
       lastStore = await store.health(); metrics.observe('storeMs', lastStore.latencyMs || 0);
       if (lastStore.ok) await syncClock().catch(() => {});
+      if (lastStore.ok) await refreshSecurityState().catch(e => logger.warn('security_state_refresh_failed', { error: String(e && e.message).slice(0, 120) }));
       // el interruptor Flash se refresca con este sondeo (cada 5 s): así no hay una consulta al almacenamiento por cada petición de página
       if (lastStore.ok) { const f = await store.getSetting('flashEnabled'); if (f !== null && f !== undefined) flashEnabled = f === '1'; }
     } catch (e) { lastStore = { ok: false, latencyMs: null, kind: store.kind, error: e.message }; }
@@ -153,10 +193,15 @@ function createApp(userConfig = {}, deps = {}) {
   const hub = createHub({ config, store, metrics, logger, auth, getHealth, clock });
 
   // ------------------------------------------------------------------ utilidades HTTP
+  // IP del cliente = clave de los límites y de los logs. Con proxy de confianza se toma la entrada de X-Forwarded-For que agregó NUESTRO proxy (la n-ésima desde
+  // la derecha: las anteriores las puede falsificar el cliente); si no es una IP válida se usa la dirección del socket. Siempre normalizada (ver normalizeIp).
   function clientIp(req) {
-    const xff = String(req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
-    if (config.trustProxyHops > 0 && xff.length) return xff[Math.max(0, xff.length - config.trustProxyHops)];
-    return req.socket.remoteAddress || 'unknown';
+    const fromSocket = normalizeIp(req.socket.remoteAddress) || 'unknown';
+    if (config.trustProxyHops > 0) {
+      const xff = String(req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (xff.length) return normalizeIp(xff[Math.max(0, xff.length - config.trustProxyHops)]) || fromSocket;
+    }
+    return fromSocket;
   }
   // Solo se acepta un Host con forma de nombre/puerto (sin espacios, ';' ni comas): se refleja en la CSP y en el enlace del QR.
   function safeHost(req) {
@@ -176,7 +221,7 @@ function createApp(userConfig = {}, deps = {}) {
   function baseHeaders(extra) {
     return {
       'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY',
-      'cross-origin-opener-policy': 'same-origin', 'permissions-policy': 'camera=(self), microphone=(self), geolocation=()',
+      'cross-origin-opener-policy': 'same-origin', 'cross-origin-resource-policy': 'same-origin', 'permissions-policy': 'camera=(self), microphone=(self), geolocation=()',
       ...(config.production ? { 'strict-transport-security': 'max-age=31536000; includeSubDomains' } : {}),
       ...extra
     };
@@ -203,6 +248,8 @@ function createApp(userConfig = {}, deps = {}) {
       req.on('end', () => {
         if (overflow) return;
         if (!size) return resolve({});
+        // Solo application/json: una petición «simple» entre sitios (text/plain, formulario) llega sin pre-vuelo CORS y no debe poder ejecutar acciones.
+        if (!/^application\/json\s*(;|$)/i.test(String(req.headers['content-type'] || ''))) return reject(Object.assign(new Error('Content-Type debe ser application/json'), { status: 415, code: 'UNSUPPORTED_MEDIA_TYPE' }));
         try { const v = JSON.parse(Buffer.concat(chunks).toString('utf8')); resolve(v && typeof v === 'object' && !Array.isArray(v) ? v : {}); }
         catch { reject(Object.assign(new Error('JSON inválido'), { status: 400 })); }
       });
@@ -265,7 +312,11 @@ function createApp(userConfig = {}, deps = {}) {
 
     if (m === 'OPTIONS') { res.writeHead(204, baseHeaders({ ...corsHeaders(req), 'access-control-allow-methods': 'GET,POST', 'access-control-allow-headers': 'authorization,content-type', 'access-control-max-age': '600' })); return res.end(); }
 
-    if ((m === 'GET' || m === 'HEAD') && p === '/healthz') return sendJson(req, res, 200, { ok: true, status: 'alive', uptimeS: Math.round((Date.now() - startedAt) / 1000) });
+    // Las acciones (POST) nunca se aceptan desde otro sitio: los navegadores informan Sec-Fetch-Site y no se puede falsificar desde una página web.
+    if (m === 'POST' && req.headers['sec-fetch-site'] === 'cross-site') { metrics.inc('cross_site_post_rejected'); return sendJson(req, res, 403, { error: 'FORBIDDEN', message: 'Petición entre sitios no permitida' }); }
+
+    // Salud pública mínima: sin tiempos de actividad ni detalles internos (eso va en /api/admin/status, solo operador).
+    if ((m === 'GET' || m === 'HEAD') && p === '/healthz') return sendJson(req, res, 200, { ok: true, status: 'alive' });
 
     if (m === 'GET' && p === '/readyz') {
       const h = getHealth();
@@ -275,23 +326,43 @@ function createApp(userConfig = {}, deps = {}) {
 
     if (m === 'GET' && p === '/metrics') {
       const t = auth.bearer(req);
-      const ok = (config.metricsToken && t && t.length === config.metricsToken.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(config.metricsToken))) || (t && auth.verifyOperator(t));
+      const ok = (config.metricsToken && t && crypto.timingSafeEqual(sha256(t), sha256(config.metricsToken))) || (t && auth.verifyOperator(t));    // se comparan resúmenes: ni el contenido ni la longitud del token se filtran por tiempo
       if (!ok) return sendJson(req, res, 401, { error: 'UNAUTHORIZED' });
       res.writeHead(200, baseHeaders({ 'content-type': 'text/plain; version=0.0.4', 'cache-control': 'no-store' }));
       return res.end(metrics.prometheus());
     }
 
     if (m === 'POST' && p === '/api/master/login') {
-      if (!loginLimiter.hit(ip)) { metrics.inc('login_rate_limited'); return sendJson(req, res, 429, { error: 'RATE_LIMITED', message: 'Demasiados intentos, esperá un minuto' }, { 'retry-after': '60' }); }
+      if (!(await loginLimiter.hit(ip))) { metrics.inc('login_rate_limited'); return sendJson(req, res, 429, { error: 'RATE_LIMITED', message: 'Demasiados intentos, esperá un minuto' }, { 'retry-after': '60' }); }
+      const started = Date.now();
       const body = await readJson(req);
-      if (!auth.checkPassword(body.password)) {
-        metrics.inc('login_failed'); logger.warn('login_failed', { ip });
-        await new Promise(r => setTimeout(r, 250));
-        return sendJson(req, res, 401, { error: 'UNAUTHORIZED', message: 'Contraseña incorrecta' });
-      }
+      const good = auth.checkPassword(body.password);
+      if (!good) { await loginFailLimiter.hit('all'); metrics.inc('login_failed'); logger.warn('login_failed', { ip }); }
+      // Duración mínima IGUAL para éxito y fallo (sin canal de tiempo). Con muchos fallos entre todas las IP (intento distribuido) se demora toda respuesta de login
+      // (también las correctas): se frena al atacante sin bloquear al operador legítimo.
+      const tarpit = !(await loginFailLimiter.peek('all'));
+      if (tarpit) { metrics.inc('login_tarpit'); }
+      await sleep(Math.max(0, started + (tarpit ? LOGIN_TARPIT_MS : LOGIN_MIN_MS) - Date.now()));
+      if (!good) return sendJson(req, res, 401, { error: 'UNAUTHORIZED', message: 'Contraseña incorrecta' });
       metrics.inc('login_ok'); logger.info('login_ok', { ip });
+      // Generación vigente leída del almacenamiento justo antes de emitir: así un token no nace ya invalidado por un «cerrar sesión en todos» que esta instancia
+      // todavía no había sincronizado (el sondeo de 5 s). Si el almacenamiento no responde se usa la última conocida.
+      try { const g = await store.getSetting('opGen'); if (g !== null && g !== undefined) auth.setMinGeneration(Number(g)); } catch { /* se mantiene la última generación conocida */ }
       const t = auth.issueOperatorToken();
       return sendJson(req, res, 200, { operatorToken: t.token, expiresAt: t.expiresAt });
+    }
+
+    // Cierre de sesión con revocación EN EL SERVIDOR: el token usado deja de valer de inmediato aquí y en pocos segundos en las demás instancias.
+    // { "all": true } además invalida todos los tokens de operador emitidos hasta ahora («cerrar sesión en todos lados»).
+    if (m === 'POST' && p === '/api/master/logout') {
+      const payload = requireOperator(req);
+      const body = await readJson(req);
+      if (body.all !== undefined && typeof body.all !== 'boolean') return sendJson(req, res, 400, { error: 'INVALID_BODY', message: 'Se esperaba { "all": true | false }' });
+      const rev = auth.revokeOperatorToken(payload);                         // efecto inmediato en esta instancia
+      await store.revokeToken(rev.jti, rev.exp);                              // compartido con las demás
+      if (body.all === true) auth.setMinGeneration(await store.incrSetting('opGen'));
+      metrics.inc(body.all === true ? 'logout_all' : 'logout'); logger.info('operator_logout', { all: body.all === true });
+      return sendJson(req, res, 200, { ok: true, all: body.all === true });
     }
 
     if (m === 'POST' && p === '/api/sessions') {
@@ -315,7 +386,9 @@ function createApp(userConfig = {}, deps = {}) {
       if (m === 'POST' && action === 'revoke') { requireOperator(req); logger.warn('master_tokens_revoked', { sessionId: id }); return sendJson(req, res, 200, await sessions.revokeMasterTokens(id)); }
       if (m === 'GET' && action === 'status') {
         const rec = await sessions.get(id);
-        if (!rec) { badJoinLimiter.hit(ip); return sendJson(req, res, 404, { error: 'SESSION_NOT_FOUND' }); }
+        // Consulta pública a una sesión inexistente: tiene su PROPIO límite por IP. Antes contaba contra el límite de uniones fallidas por WebSocket, de modo que una sola
+        // persona detrás de un NAT compartido podía dejar sin conexión nueva a toda esa IP.
+        if (!rec) { if (!(await statusMissLimiter.hit(ip))) { metrics.inc('status_miss_rate_limited'); return sendJson(req, res, 429, { error: 'RATE_LIMITED' }, { 'retry-after': '30' }); } return sendJson(req, res, 404, { error: 'SESSION_NOT_FOUND' }); }
         const t = auth.bearer(req);
         if (t && auth.verifyOperator(t)) {
           const total = await store.presenceTotal(id);
@@ -340,7 +413,7 @@ function createApp(userConfig = {}, deps = {}) {
 
     if (m === 'GET' && p === '/api/admin/status') {
       requireOperator(req);
-      return sendJson(req, res, 200, { version: VERSION, health: getHealth(), hub: { ...hub.stats(), internals: hub.debugCounts() }, metrics: metrics.snapshot(), store: { ...lastStore, config: storeConfig() }, flash: { enabled: flashEnabled }, clock: { source: clock.source, offsetMs: Math.round(clock.offsetMs * 10) / 10, storeRttMs: clock.rttMs == null ? null : Math.round(clock.rttMs * 10) / 10, synced: clock.synced, ageMs: clock.updatedAt ? Date.now() - clock.updatedAt : null }, instance: config.instanceId, cluster: { workerId: process.env.NODE_UNIQUE_ID || null }, sessions: await store.countSessions().catch(() => null) });
+      return sendJson(req, res, 200, { version: VERSION, health: getHealth(), hub: { ...hub.stats(), internals: hub.debugCounts() }, metrics: metrics.snapshot(), store: { ...lastStore, config: storeConfig() }, flash: { enabled: flashEnabled }, security: { tokenSecretSource: config.tokenSecretSource, publicBaseUrlSource: config.publicBaseUrlSource, originFromHost: Boolean(config.originFromHost), rateLimit: { backend: rlStore ? store.kind : 'local', degraded: [httpLimiter, loginLimiter, badJoinLimiter].some(l => l.degraded) }, operatorGeneration: auth.generation, revokedOperatorTokens: auth.revokedCount }, clock: { source: clock.source, offsetMs: Math.round(clock.offsetMs * 10) / 10, storeRttMs: clock.rttMs == null ? null : Math.round(clock.rttMs * 10) / 10, synced: clock.synced, ageMs: clock.updatedAt ? Date.now() - clock.updatedAt : null }, instance: config.instanceId, cluster: { workerId: process.env.NODE_UNIQUE_ID || null }, sessions: await store.countSessions().catch(() => null) });
     }
 
     if (m === 'GET' || m === 'HEAD') return serveStatic(req, res, p, u.searchParams);
@@ -357,7 +430,13 @@ function createApp(userConfig = {}, deps = {}) {
     try {
       const isStaticAsset = (req.method === 'GET' || req.method === 'HEAD') && !u.pathname.startsWith('/api/') && u.pathname !== '/metrics' && u.pathname !== '/healthz' && u.pathname !== '/readyz';
       const exempt = u.pathname === '/healthz' || u.pathname === '/readyz';
-      const allowed = exempt || (isStaticAsset ? (!staticLimiter || staticLimiter.hit(ip)) : httpLimiter.hit(ip));
+      // http -> https (solo con proxy de confianza que informa X-Forwarded-Proto). Los sondeos de salud de la plataforma quedan exentos.
+      if (config.httpsRedirect && !exempt && config.trustProxyHops > 0 && String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase() === 'http') {
+        const base = config.publicBaseUrl || `https://${safeHost(req)}`;
+        res.writeHead(308, baseHeaders({ location: base.replace(/^http:/, 'https:') + u.pathname + u.search, 'cache-control': 'no-store' }));
+        metrics.inc('https_redirects'); return res.end();
+      }
+      const allowed = exempt || (isStaticAsset ? (!staticLimiter || staticLimiter.hit(ip)) : await httpLimiter.hit(ip));
       if (!allowed) {
         metrics.inc('http_rate_limited');
         return sendJson(req, res, 429, { error: 'RATE_LIMITED' }, { 'retry-after': '30' });
@@ -386,8 +465,9 @@ function createApp(userConfig = {}, deps = {}) {
     if (!origin) return config.allowNoOrigin;
     let o; try { o = new URL(origin); } catch { return false; }
     if (config.allowedOrigins.includes(origin)) return true;
-    if (config.publicBaseUrl && new URL(config.publicBaseUrl).host === o.host) return true;
-    return o.host === req.headers.host;
+    if (config.publicBaseUrl && new URL(config.publicBaseUrl).origin === o.origin) return true;       // URL canónica (esquema + host + puerto)
+    // Coincidencia con el encabezado Host: solo fuera de producción. Host lo escribe quien hace la petición, así que no es una referencia confiable.
+    return config.originFromHost ? o.host === req.headers.host : false;
   }
 
   function refuse(socket, status, text) {
@@ -396,18 +476,27 @@ function createApp(userConfig = {}, deps = {}) {
   }
 
   server.on('upgrade', (req, socket, head) => {
-    const ip = clientIp(req);
     socket.on('error', () => {});
+    handleUpgrade(req, socket, head).catch(e => { logger.error('upgrade_failed', { error: String(e && e.message).slice(0, 120) }); refuse(socket, 500, 'Internal Server Error'); });
+  });
+
+  async function handleUpgrade(req, socket, head) {
+    const ip = clientIp(req);
     let u; try { u = new URL(req.url, 'http://localhost'); } catch { return refuse(socket, 400, 'Bad Request'); }
     if (u.pathname !== '/ws') return refuse(socket, 404, 'Not Found');
     if (hub.draining) { metrics.inc('ws_rejected_draining'); return refuse(socket, 503, 'Service Unavailable'); }
     if (hub.connectionCount >= config.maxConnections) { metrics.inc('ws_rejected_capacity'); return refuse(socket, 503, 'Service Unavailable'); }
     if (!originAllowed(req)) { metrics.inc('ws_rejected_origin'); logger.warn('ws_origin_rejected', { ip, origin: String(req.headers.origin || '').slice(0, 120) }); return refuse(socket, 403, 'Forbidden'); }
+    // Única comprobación asíncrona (límite compartido de uniones fallidas). Las que cuentan conexiones van DESPUÉS: la comprobación y el alta en el hub
+    // quedan contiguas y sin await de por medio, así que una ráfaga simultánea no puede superar el tope de conexiones sin hello por IP.
+    const notBlocked = await badJoinLimiter.peek(ip);
+    if (socket.destroyed) return;                                           // el cliente se fue mientras se comprobaba
+    if (!notBlocked) { metrics.inc('ws_rejected_badjoin'); return refuse(socket, 429, 'Too Many Requests'); }
     const ipSt = hub.ipState(ip);
     if (ipSt.pre >= config.preHelloMaxPerIp) { metrics.inc('ws_rejected_prehello'); return refuse(socket, 429, 'Too Many Requests'); }
     if (config.maxConnPerIp > 0 && ipSt.total >= config.maxConnPerIp) { metrics.inc('ws_rejected_ipcap'); return refuse(socket, 429, 'Too Many Requests'); }
     if (!wsConnLimiter.hit(ip)) { metrics.inc('ws_rejected_rate'); return refuse(socket, 429, 'Too Many Requests'); }
-    if (!badJoinLimiter.peek(ip)) { metrics.inc('ws_rejected_badjoin'); return refuse(socket, 429, 'Too Many Requests'); }
+    if (hub.connectionCount >= config.maxConnections) { metrics.inc('ws_rejected_capacity'); return refuse(socket, 503, 'Service Unavailable'); }
     wss.handleUpgrade(req, socket, head, ws => {
       // Compatibilidad V3.0: /ws?session=CODIGO&role=public&deviceId=ID (sin hello). Solo para participantes.
       let legacy = null;
@@ -417,14 +506,17 @@ function createApp(userConfig = {}, deps = {}) {
         if (SESSION_RE.test(sid)) legacy = { sessionId: sid, deviceId: /^[A-Za-z0-9_-]{8,80}$/.test(did) ? did : undefined };
       }
       const conn = hub.accept(ws, req, ip, legacy);
-      conn.onBadJoin = () => badJoinLimiter.hit(ip);
+      // Cuenta una unión fallida (sesión inexistente, token inválido, violaciones de protocolo) contra la IP. No incluye el vencimiento del hello: una red
+      // saturada hace que teléfonos legítimos tarden, y contarlo bloquearía a todo el NAT que comparte esa IP (realimentación).
+      conn.onBadJoin = () => { badJoinLimiter.hit(ip).catch(() => {}); };
     });
-  });
+  }
 
   // ------------------------------------------------------------------ ciclo de vida
   async function start() {
     await store.init();
     if (store.kind === 'redis') for (let i = 0; i < 4; i++) await syncClock().catch(() => {});      // varias muestras antes de aceptar tráfico: la mejor (menor RTT) fija el reloj
+    await refreshSecurityState().catch(() => {});                                                    // revocaciones vigentes antes de aceptar la primera petición
     await pollStore();
     hub.start();
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(config.port, config.host, config.listenBacklog, resolve); });
@@ -448,7 +540,7 @@ function createApp(userConfig = {}, deps = {}) {
     logger.info('shutdown_done', { remaining: hub.connectionCount });
   }
 
-  return { config, server, wss, hub, store, metrics, auth, sessions, logger, clock, start, shutdown, getHealth, address: () => server.address() };
+  return { config, server, wss, hub, store, metrics, auth, sessions, logger, clock, start, shutdown, getHealth, refreshSecurityState, address: () => server.address() };
 }
 
-module.exports = { createApp };
+module.exports = { createApp, normalizeIp };

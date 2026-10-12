@@ -11,6 +11,20 @@ function initialState(now = Date.now()) {
   };
 }
 
+/**
+ * Forma mínima de un estado de sesión (el que se guarda en Redis y viaja por pub/sub). Lo que llega de Redis NO se trata como confiable:
+ * un valor corrupto o publicado por alguien con acceso al almacenamiento no debe romper el hub ni llegar a los teléfonos sin forma de estado.
+ */
+function isStateShape(st) {
+  return Boolean(st) && typeof st === 'object' && !Array.isArray(st) &&
+    Number.isSafeInteger(st.stateVersion) && st.stateVersion >= 0 &&
+    typeof st.commandId === 'string' && st.commandId.length <= 64 &&
+    Number.isFinite(st.executeAt) && Number.isFinite(st.serverTimestamp) &&
+    Boolean(st.payload) && typeof st.payload === 'object' && !Array.isArray(st.payload) && typeof st.payload.effect === 'string';
+}
+/** Mensaje del canal de pub/sub de una sesión: { k: 'state', s: <estado> }. */
+function isBusMessage(m) { return Boolean(m) && typeof m === 'object' && m.k === 'state' && isStateShape(m.s); }
+
 function ackBucket(absDeviationMs) {
   let i = 0;
   while (i < ACK_EDGES.length && absDeviationMs > ACK_EDGES[i]) i++;
@@ -34,4 +48,4 @@ function summarizeAcks(h, tolerance) {
   };
 }
 
-module.exports = { ACK_EDGES, initialState, ackBucket, summarizeAcks };
+module.exports = { ACK_EDGES, initialState, ackBucket, summarizeAcks, isStateShape, isBusMessage };
