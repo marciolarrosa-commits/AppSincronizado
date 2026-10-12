@@ -1,0 +1,33 @@
+# Blueprint de Render para Destello Sync V3.1.
+# IMPORTANTE:
+#  * El plan "free" es solo para desarrollo/validación: 0,1 CPU, 512 MB, una única instancia, se duerme tras 15 min sin tráfico
+#    y su Key Value gratuito (25 MB, 50 conexiones) no persiste. NO es una garantía de capacidad para un evento real (ver docs/DESPLIEGUE_RENDER.md).
+#  * El nombre del servicio define la URL pública. Para conservar https://appsincronizado.onrender.com el servicio debe llamarse "appsincronizado".
+#    Si ya existe, no hace falta aplicar este Blueprint: basta con hacer push al repositorio conectado y cargar las variables de entorno en el panel.
+services:
+  - type: web
+    name: appsincronizado
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz          # liveness; /readyz es la disponibilidad (503 si el almacenamiento falla o se está reiniciando)
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MASTER_PASSWORD           # Render genera un valor aleatorio; se consulta en el panel (Environment) y es la clave de /master
+        generateValue: true
+      - key: SHUTDOWN_GRACE_MS         # Render envía SIGTERM y espera 30 s por defecto
+        value: "25000"
+      - key: REDIS_URL                 # estado compartido (necesario para >1 instancia). Quitar este bloque para usar memoria (una sola instancia)
+        fromService:
+          type: keyvalue
+          name: destello-keyvalue
+          property: connectionString
+
+  - type: keyvalue
+    name: destello-keyvalue
+    plan: free                         # 25 MB / 50 conexiones / sin persistencia. Para un evento: plan pago (ver docs)
+    ipAllowList: []                    # solo red interna de Render
+    maxmemoryPolicy: noeviction

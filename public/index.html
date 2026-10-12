@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0c0d10">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<title>Destello·Sync — pantallas sincronizadas</title>
+<!-- Portada de Destello·Sync V3. La pantalla del participante NO vive acá: los QR abren /?s=CODIGO&mode=remote (el servidor entrega ese cliente). -->
+<style>
+:root{--bg:#0c0d10;--card:#17191e;--card2:#20232a;--fg:#f7f7f5;--muted:#a3a8b3;--line:#30343c;--accent:#f6d20a;--danger:#ff7b7b}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,sans-serif;min-height:100dvh;line-height:1.5;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+.wrap{max-width:860px;margin:0 auto;padding:28px 18px 48px}
+.brand{font-weight:700;letter-spacing:.02em}
+.brand b{color:var(--accent)}
+h1{font-size:clamp(30px,6vw,52px);line-height:1.05;margin:36px 0 14px}
+.lead{font-size:clamp(16px,2.4vw,19px);color:var(--muted);max-width:60ch;margin:0 0 26px}
+.btn{display:inline-block;border:1px solid var(--line);background:var(--card2);color:var(--fg);padding:14px 20px;border-radius:12px;font-weight:650;font-size:16px;text-decoration:none;cursor:pointer;min-height:48px}
+.btn.primary{background:var(--accent);color:#111;border-color:transparent}
+.btn:focus-visible,input:focus-visible{outline:3px solid #fff;outline-offset:2px}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:38px 0 0;padding:0;list-style:none;counter-reset:s}
+.steps li{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;counter-increment:s}
+.steps li::before{content:counter(s);display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--accent);color:#111;font-weight:800;margin-bottom:8px}
+.steps strong{display:block;margin-bottom:4px}
+.steps span{color:var(--muted);font-size:14px}
+.join{margin-top:34px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}
+.join h2{margin:0 0 4px;font-size:18px}
+.join p{margin:0 0 12px;color:var(--muted);font-size:14px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+input{background:var(--card2);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:18px;letter-spacing:.14em;text-transform:uppercase;width:11em;min-height:48px;font-family:ui-monospace,monospace}
+.err{color:var(--danger);font-size:14px;margin:8px 0 0;min-height:1.3em}
+.note{margin-top:30px;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="brand">Destello<b>·</b>Sync</div>
+  <h1>Todas las pantallas del público, al mismo tiempo.</h1>
+  <p class="lead">Un operador crea una sesión, muestra un código QR y controla desde su panel los colores y efectos de cada celular conectado, en tiempo real y sincronizados.</p>
+  <a class="btn primary" id="open-master" href="/master">Abrir panel del operador</a>
+
+  <ol class="steps">
+    <li><strong>El operador crea la sesión</strong><span>Inicia sesión en el panel y se genera un código y un QR.</span></li>
+    <li><strong>El público se une</strong><span>Escanea el QR con la cámara del celular. No instala nada ni inicia sesión.</span></li>
+    <li><strong>Colores y efectos sincronizados</strong><span>El operador envía el color o el efecto y todos los teléfonos lo muestran a la vez.</span></li>
+  </ol>
+
+  <form class="join" id="join" autocomplete="off">
+    <h2>¿Sos parte del público y no tenés el QR?</h2>
+    <p>Escribí el código de 6 caracteres que aparece debajo del QR en la pantalla del operador.</p>
+    <div class="row">
+      <input id="code" type="text" maxlength="6" inputmode="text" autocapitalize="characters" spellcheck="false" placeholder="AB3F9K" aria-label="Código de sesión">
+      <button class="btn" type="submit">Unirme</button>
+    </div>
+    <p class="err" id="err" role="alert"></p>
+  </form>
+
+  <p class="note">Las luces intensas pueden afectar a personas con sensibilidad a la luz. El operador controla los efectos y puede detener todo al instante.</p>
+</main>
+<script>
+(function () {
+  // Mismo alfabeto que valida el servidor (sin I, O, 0, 1)
+  var RE = /^[A-HJ-NP-Z2-9]{6}$/;
+  var form = document.getElementById('join'), input = document.getElementById('code'), err = document.getElementById('err');
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var c = input.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    if (!RE.test(c)) { err.textContent = 'Código inválido: 6 caracteres (letras y números, sin I, O, 0, 1).'; return; }
+    err.textContent = '';
+    location.assign('/?s=' + c + '&mode=remote');
+  });
+})();
+</script>
+</body>
+</html>

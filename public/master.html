@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="es">
+<head>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Destello·Sync Master</title>
+<style>
+:root{--bg:#0c0d10;--card:#17191e;--card2:#20232a;--fg:#f7f7f5;--muted:#969ba6;--line:#30343c;--accent:#f6d20a;--danger:#ff5c5c;--ok:#78e08f;--warn:#ffcc66}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,sans-serif;min-height:100dvh}
+.wrap{max-width:1100px;margin:auto;padding:24px}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;gap:12px;flex-wrap:wrap}
+.brand{font-weight:700}
+.pills{display:flex;gap:8px;flex-wrap:wrap}
+.pill{font-size:12px;color:var(--warn);border:1px solid var(--line);border-radius:999px;padding:5px 10px}
+.pill.ok{color:var(--ok)}.pill.bad{color:var(--danger);border-color:var(--danger)}
+.grid{display:grid;grid-template-columns:1.15fr .85fr;gap:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;margin-bottom:18px}
+.hero{font-size:clamp(28px,5vw,48px);line-height:1.04;margin:0 0 8px}
+h2{margin:0 0 10px;font-size:18px}
+.muted{color:var(--muted)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{border:1px solid var(--line);background:var(--card2);color:var(--fg);padding:12px 16px;border-radius:11px;font-weight:650;cursor:pointer;font-size:15px}
+.btn.primary{background:var(--accent);color:#111;border-color:transparent}
+.btn.danger{border-color:var(--danger);color:var(--danger)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.emergency{width:100%;padding:18px;font-size:20px;background:#b3141b;border:0;color:#fff;border-radius:14px;font-weight:800;cursor:pointer;letter-spacing:.04em}
+.metric{font-size:52px;font-weight:750;line-height:1;margin:8px 0}
+.qr{background:#fff;border-radius:14px;padding:14px;text-align:center}
+.qr img,.qr canvas,.qr svg{width:min(100%,420px);height:auto;display:block;margin:auto}
+.code{font:700 32px ui-monospace,monospace;letter-spacing:.14em;color:#111}
+.colors{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-top:12px}
+.color{height:54px;border-radius:13px;border:2px solid rgba(255,255,255,.15);cursor:pointer}
+.color.active{outline:3px solid #fff;outline-offset:2px}
+.effects{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.hidden{display:none!important}
+.small{font-size:12px}
+.url{font-size:12px;word-break:break-all;color:var(--muted);margin:8px 0}
+input[type=password],input[type=text],input[type=number],select{background:var(--card2);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:11px 12px;font-size:15px}
+label{font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+.params{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:12px}
+.alert{border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:14px}
+.alert.warn{background:#3a2d0a;border:1px solid #6b5410;color:var(--warn)}
+.alert.bad{background:#3b1215;border:1px solid #7a1f25;color:#ffb3b3}
+.alert.info{background:#10261d;border:1px solid #1d5a3b;color:var(--ok)}
+.risk{background:#2a1810;border:1px solid #6b3a1d;border-radius:12px;padding:12px 14px;font-size:13px;color:#ffd6b0}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px}
+.kv b{color:var(--muted);font-weight:500}
+.seq-list{list-style:none;margin:10px 0;padding:0;display:grid;gap:8px}
+.seq-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:8px 10px;cursor:pointer}
+.seq-row.sel{outline:2px solid var(--accent)}
+.seq-row .nm{min-width:92px;font-size:13px;color:var(--muted)}
+.seq-row input[type=color]{width:52px;height:38px;padding:0;background:transparent;border:0;cursor:pointer}
+.seq-row input[type=number]{width:84px}
+.seq-row .del{margin-left:auto;padding:8px 12px}
+.st-ok{color:var(--ok)}.st-bad{color:var(--danger)}.st-warn{color:var(--warn)}.st-pending{color:var(--fg)}.st-muted{color:var(--muted)}
+ul.sessions{list-style:none;margin:10px 0 0;padding:0}
+ul.sessions li{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-family:ui-monospace,monospace}
+@media(max-width:800px){.grid{grid-template-columns:1fr}.wrap{padding:14px}.metric{font-size:42px}.colors{grid-template-columns:repeat(4,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="brand">Destello·Sync <span class="muted">Master</span></div>
+    <div class="pills">
+      <span id="status" class="pill">● sin sesión</span>
+      <span id="health" class="pill">salud: —</span>
+      <button id="logout" class="btn hidden" type="button">Salir</button>
+    </div>
+  </div>
+
+  <div id="alerts"></div>
+
+  <!-- 1) Acceso del operador -->
+  <div id="loginView" class="card">
+    <h1 class="hero">Panel del operador</h1>
+    <p class="muted">Ingresá con la contraseña de operador. Solo quien la conoce puede crear sesiones y controlar las pantallas.</p>
+    <form id="loginForm" class="row" autocomplete="on">
+      <input type="text" name="username" value="operador" autocomplete="username" hidden>
+      <input id="password" type="password" placeholder="Contraseña de operador" autocomplete="current-password" required style="min-width:260px">
+      <button class="btn primary" type="submit">Ingresar</button>
+    </form>
+    <p id="loginError" class="small" style="color:var(--danger)"></p>
+  </div>
+
+  <!-- 2) Crear o retomar una sesión -->
+  <div id="setupView" class="card hidden">
+    <h1 class="hero">Controlá las luces del público.</h1>
+    <p class="muted">Creá una sesión nueva y mostrale el QR a la tribuna, o retomá una sesión activa.</p>
+    <div class="row"><button id="create" class="btn primary" type="button">Crear sesión nueva</button><button id="refresh" class="btn" type="button">Actualizar lista</button></div>
+    <ul id="sessionList" class="sessions"></ul>
+  </div>
+
+  <!-- 3) Control -->
+  <div id="control" class="grid hidden">
+    <section>
+      <div class="card">
+        <div class="muted small">CELULARES CONECTADOS (público; el Master no cuenta)</div>
+        <div id="count" class="metric">0</div>
+        <div class="muted small" id="countDetail">Esperando conexiones…</div>
+      </div>
+
+      <div class="card">
+        <button id="stop" class="emergency" type="button">■ DETENER TODO (volver a pantalla apagada) — tecla Esc</button>
+      </div>
+
+      <div class="card">
+        <h2>Color</h2>
+        <div id="colors" class="colors"></div>
+        <div class="row" style="margin-top:14px">
+          <input id="custom" type="color" value="#FFD400" style="width:58px;height:46px;background:transparent;border:0" aria-label="Color personalizado">
+          <span class="muted small" id="colorHex">#FFD400</span>
+        </div>
+
+        <h2 style="margin-top:22px">Efecto</h2>
+        <div id="effects" class="effects">
+          <button class="btn primary" data-effect="solid" type="button">Fijo</button>
+          <button class="btn" data-effect="fade" type="button">Transición</button>
+          <button class="btn" data-effect="pulse" type="button">Pulso</button>
+          <button class="btn" data-effect="strobe" type="button">Strobe</button>
+          <button class="btn" data-effect="sequence" type="button">Secuencia</button>
+        </div>
+        <div class="params">
+          <label id="pFade" class="">Duración de transición (ms)<input id="fadeMs" type="number" min="0" max="10000" step="100" value="500"></label>
+          <label id="pColor2" class="hidden">Segundo color<input id="color2" type="color" value="#0A84FF"></label>
+          <label id="pPeriod" class="hidden">Período del pulso (ms)<input id="periodMs" type="number" min="600" max="10000" step="100" value="2000"></label>
+          <label id="pHz" class="hidden">Frecuencia strobe (Hz, máx <span id="maxHz">3</span>)<input id="hz" type="number" min="0.5" max="3" step="0.5" value="2"></label>
+          <label id="pDur" class="hidden">Duración del efecto (s, 0 = sin límite en pulso)<input id="durationS" type="number" min="0" max="600" step="1" value="10"></label>
+          <label>Margen de sincronización
+            <select id="lead"><option value="800">Rápido (0,8 s)</option><option value="1500" selected>Normal (1,5 s)</option><option value="3000">Seguro (3 s)</option></select>
+          </label>
+        </div>
+        <!-- Secuencia de colores: color inicial + los que se agreguen con «＋»; cada uno dura los segundos indicados y al terminar vuelve al primero -->
+        <div id="pSeq" class="hidden" style="margin-top:14px">
+          <p class="muted small" style="margin:0 0 6px">Cada color se muestra los segundos que indiques; al llegar al último vuelve al primero y <strong>se repite sin parar hasta que pulses DETENER TODO</strong> (o hasta la duración total que fijes). Para asignar un color, tocá una fila y elegí uno de la paleta de arriba o del selector de la fila.</p>
+          <ol id="seqList" class="seq-list" aria-label="Colores de la secuencia"></ol>
+          <div class="row"><button id="seqAdd" class="btn" type="button">＋ Agregar color</button><span id="seqSummary" class="muted small" aria-live="polite"></span></div>
+          <div class="params">
+            <label>Transición entre colores (ms; 0 = corte seco)<input id="seqFadeMs" type="number" min="0" max="10000" step="100" value="0"></label>
+            <label>Duración total (s; 0 = hasta DETENER TODO)<input id="seqDurationS" type="number" min="0" max="600" step="1" value="0"></label>
+          </div>
+        </div>
+        <div class="row" style="margin-top:16px"><button id="send" class="btn primary" type="button" disabled>Aplicar a todos</button></div>
+
+        <div id="strobeBox" class="risk hidden" style="margin-top:16px">
+          <strong>⚠ Advertencia de fotosensibilidad.</strong> Los efectos estroboscópicos pueden provocar molestias o crisis en personas con epilepsia fotosensible.
+          Usalos solo si el evento lo permite, con aviso previo al público, a baja frecuencia (el sistema limita a 3 Hz) y por poco tiempo.
+          <div class="row" style="margin-top:10px">
+            <label style="flex-direction:row;align-items:center;gap:8px;color:#ffd6b0"><input id="riskAck" type="checkbox"> Entiendo el riesgo y autorizo el strobe en esta sesión</label>
+            <button id="strobeEnable" class="btn" type="button" disabled>Habilitar strobe</button>
+            <button id="strobeDisable" class="btn hidden" type="button">Deshabilitar strobe</button>
+          </div>
+          <div class="small" id="strobeState" style="margin-top:6px">Strobe deshabilitado (valor seguro por defecto).</div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="card">
+        <div class="qr" id="qr"></div>
+        <div class="code" id="code" style="text-align:center;background:#fff;border-radius:0 0 14px 14px;margin-top:-6px;padding-bottom:10px">------</div>
+        <p id="url" class="url"></p>
+        <div class="row"><button id="copy" class="btn" type="button">Copiar enlace</button><button id="open" class="btn" type="button">Abrir vista pública</button></div>
+      </div>
+
+      <div class="card">
+        <h2>Última orden</h2>
+        <div class="kv">
+          <b>Servidor</b><span id="kAccepted" aria-live="polite">—</span>
+          <b>Dispositivos</b><span id="kApplied" aria-live="polite">—</span>
+          <b>A tiempo</b><span id="kOnTime">—</span>
+          <b>Desviación</b><span id="kDev">—</span>
+          <b>Estado vigente</b><span id="kState">—</span>
+        </div>
+        <p class="muted small" style="margin:10px 0 0">«Aceptada» significa que el servidor validó y publicó la orden. «Aplicada» solo se declara cuando una muestra de teléfonos lo confirma; si ninguno informa, el panel lo dice (no lo da por hecho). Una orden sin respuesta termina como «Sin confirmación» y una rechazada muestra el código y el motivo.</p>
+        <ul id="orderLog" class="sessions" aria-label="Órdenes recientes"></ul>
+      </div>
+
+      <div class="card">
+        <h2>Estado del sistema</h2>
+        <div class="kv">
+          <b>Salud</b><span id="hStatus">—</span>
+          <b>Latencia del bucle</b><span id="hLag">—</span>
+          <b>Almacenamiento</b><span id="hStore">—</span>
+          <b>Conexión Master</b><span id="hConn">—</span>
+          <b>Reloj de los teléfonos</b><span id="hClock" title="Mejor RTT que informa cada teléfono: el error de su reloj es como máximo la mitad">—</span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- 4) App Flash (micrófono + linterna): convive con las sesiones de arriba; el operador decide si el público puede entrar a ella -->
+  <div id="flashCard" class="card hidden">
+    <h2>App Flash (micrófono y linterna)</h2>
+    <p class="muted small" style="margin:0 0 12px">Es la aplicación anterior: cada teléfono hace destellar su flash al ritmo de la música que capta con su micrófono. Funciona aparte de las sesiones de arriba (no usa el control del operador). Mientras esté deshabilitada, su dirección <code>/flash</code> no abre. Habilitarla genera un QR propio, distinto del QR de la sesión.</p>
+    <div class="row">
+      <span id="flashState" class="pill">Flash: consultando…</span>
+      <button id="flashToggle" class="btn" type="button" disabled>Habilitar app Flash</button>
+    </div>
+    <div id="flashOn" class="row hidden" style="margin-top:16px;align-items:flex-start;gap:18px">
+      <div style="max-width:230px">
+        <div class="qr" id="flashQr"></div>
+        <div class="code" id="flashCode" style="text-align:center;background:#fff;border-radius:0 0 14px 14px;margin-top:-6px;padding-bottom:10px;font-size:24px">------</div>
+      </div>
+      <div style="flex:1;min-width:220px">
+        <p id="flashUrl" class="url"></p>
+        <div class="row"><button id="flashCopy" class="btn" type="button">Copiar enlace</button><button id="flashOpen" class="btn" type="button">Abrir app Flash</button><button id="flashNewCode" class="btn" type="button">Nuevo código</button></div>
+        <p class="muted small" style="margin:10px 0 0">Todos los teléfonos que escaneen este QR usan el mismo código de sesión Flash.</p>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/js/qrcode.js"></script>
+<script src="/js/pending.js"></script>
+<script src="/js/orders.js"></script>
+<script src="/js/master.js"></script>
+</body>
+</html>

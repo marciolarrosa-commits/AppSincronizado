@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="dark" />
+<meta name="robots" content="noindex" />
+<title>Calibración de color</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<style>
+  :root { --bg: #0b0b0c; --fg: #ececec; --mut: #9a9aa0; --line: #2a2a2e; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); color-scheme: dark; }
+  body { font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: max(16px, env(safe-area-inset-top)) 16px 40px; max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 4px 0 6px; } h2 { font-size: 15px; margin: 26px 0 8px; color: var(--mut); text-transform: uppercase; letter-spacing: .06em; }
+  p, li { color: #c9c9ce; } .mut { color: var(--mut); font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+  .sw { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #000; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .sw .c { height: 84px; display: block; } .sw .t { display: block; padding: 6px 8px; font-size: 12px; line-height: 1.3; color: #d8d8dc; white-space: pre-line; }
+  .sw .c.pair { background: linear-gradient(90deg, var(--a) 0 50%, var(--b) 50% 100%); }
+  pre { background: #141416; border: 1px solid var(--line); border-radius: 10px; padding: 12px; white-space: pre-wrap; word-break: break-word; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; user-select: text; }
+  #full { position: fixed; inset: 0; z-index: 9; display: none; touch-action: manipulation; }
+  #full.on { display: block; }
+  #full .cap { position: absolute; left: 0; right: 0; bottom: max(14px, env(safe-area-inset-bottom)); text-align: center; font: 600 13px/1.3 system-ui, sans-serif; color: #fff; mix-blend-mode: difference; }
+</style>
+</head>
+<body>
+<h1>Calibración de color · Destello·Sync</h1>
+<p>Abrí esta página en <b>cada modelo de teléfono</b> con el <b>brillo al máximo</b> y comparalos lado a lado (con una foto de exposición bloqueada si podés). Sirve para saber <i>qué hace cada pantalla con un mismo color</i>; no cambia nada de la app.</p>
+
+<h2>1 · Entorno de este teléfono</h2>
+<pre id="env">Leyendo…</pre>
+<p class="mut">Copiá o capturá este bloque junto con la foto. Si «Modo oscuro forzado» o «Gama» difieren entre teléfonos, ahí hay una causa.</p>
+
+<h2>2 · Blanco y escala de «blanco atenuado»</h2>
+<p class="mut">Cada parche es el blanco con la luz reducida a ese porcentaje (en luz lineal, como lo haría el brillo automático o el ahorro de energía). Si tu «blanco» al 100 % se ve como el parche del 60 %, esa pantalla está atenuada.</p>
+<div class="grid" id="ramp"></div>
+
+<h2>3 · Amarillos candidatos</h2>
+<p class="mut">Mismo matiz, distinta luminosidad. El amarillo se vuelve «marrón / mostaza» cuando su luminosidad baja; los más claros resisten mejor. Lo actual del panel es el primero.</p>
+<div class="grid" id="yel"></div>
+
+<h2>4 · Pares blanco | amarillo</h2>
+<p class="mut">Si en un teléfono las dos mitades casi no se distinguen (filtro cálido, True Tone, Night Shift, «Protección ocular»), ahí está el problema del «blanco = amarillo».</p>
+<div class="grid" id="pairs"></div>
+
+<h2>5 · Campo completo (así se ve en el espectáculo)</h2>
+<p class="mut">Tocá un parche de arriba para llenar la pantalla; tocá de nuevo para salir. Dejá el blanco encendido 60 s: si se oscurece solo, la pantalla se está atenuando (el cronómetro de abajo cuenta el tiempo).</p>
+<div class="grid" id="fulls"></div>
+<div id="full"><div class="cap" id="cap"></div></div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  function mm(q) { try { return window.matchMedia(q).matches; } catch (e) { return false; } }
+  function enc(v) { v = v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; return Math.max(0, Math.min(255, Math.round(v * 255))); }
+  function h2(n) { return (n < 16 ? '0' : '') + n.toString(16).toUpperCase(); }
+  function grey(pct) { var g = enc(pct / 100); return '#' + h2(g) + h2(g) + h2(g); }
+  var wake = null, timer = null, t0 = 0;
+
+  function patch(host, color, label, pair) {
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'sw'; b.setAttribute('aria-label', label);
+    var c = document.createElement('span'); c.className = 'c' + (pair ? ' pair' : '');
+    if (pair) { c.style.setProperty('--a', '#FFFFFF'); c.style.setProperty('--b', color); } else c.style.background = color;
+    var t = document.createElement('span'); t.className = 't'; t.textContent = label;
+    b.appendChild(c); b.appendChild(t); b.addEventListener('click', function () { openFull(color, label); });
+    host.appendChild(b);
+  }
+  [100, 90, 80, 70, 60, 50, 35].forEach(function (p) { patch($('ramp'), grey(p), (p === 100 ? 'Blanco 100 %' : 'Blanco al ' + p + ' %') + '\n' + grey(p), false); });
+  var YEL = [['#FFD400', 'Amarillo actual'], ['#FFE600', 'Amarillo 2'], ['#FFF000', 'Amarillo 3'], ['#FFFF00', 'Amarillo puro'], ['#FF9F1C', 'Naranja (panel)']];
+  YEL.forEach(function (y) { patch($('yel'), y[0], y[1] + '\n' + y[0], false); patch($('pairs'), y[0], 'Blanco | ' + y[1].toLowerCase(), true); });
+  [['#FFFFFF', 'Blanco'], ['#FFD400', 'Amarillo actual'], ['#FFF000', 'Amarillo 3'], ['#FF9F1C', 'Naranja'], ['#808080', 'Gris 50 %'], ['#000000', 'Negro']].forEach(function (f) { patch($('fulls'), f[0], 'Campo: ' + f[1], false); });
+
+  function openFull(color, label) {
+    var f = $('full'); f.style.background = color; f.classList.add('on');
+    $('cap').textContent = label.split('\n')[0] + ' · 0 s · tocá para salir'; t0 = Date.now();
+    clearInterval(timer); timer = setInterval(function () { $('cap').textContent = label.split('\n')[0] + ' · ' + Math.round((Date.now() - t0) / 1000) + ' s · tocá para salir'; }, 1000);
+    try { if (navigator.wakeLock) navigator.wakeLock.request('screen').then(function (l) { wake = l; refreshEnv(); }, function () { wake = null; refreshEnv(); }); } catch (e) { /* sin Wake Lock */ }
+  }
+  $('full').addEventListener('click', function () {
+    $('full').classList.remove('on'); clearInterval(timer); try { if (wake) wake.release(); } catch (e) { /* ya liberado */ } wake = null; refreshEnv();
+  });
+
+  function refreshEnv() {
+    var s = window.screen || {};
+    var lines = [
+      'Navegador: ' + navigator.userAgent,
+      'Pantalla: ' + s.width + '×' + s.height + ' css px · DPR ' + window.devicePixelRatio + ' · profundidad ' + (s.colorDepth || '?') + ' bits',
+      'Gama: ' + (mm('(color-gamut: rec2020)') ? 'Rec.2020' : mm('(color-gamut: p3)') ? 'Display-P3 (ancha)' : 'sRGB'),
+      'HDR (dynamic-range: high): ' + (mm('(dynamic-range: high)') ? 'sí' : 'no'),
+      'Tema del sistema oscuro: ' + (mm('(prefers-color-scheme: dark)') ? 'sí' : 'no') + ' · colores forzados: ' + (mm('(forced-colors: active)') ? 'SÍ' : 'no'),
+      'Reducir movimiento: ' + (mm('(prefers-reduced-motion: reduce)') ? 'sí' : 'no') + ' · alto contraste: ' + (mm('(prefers-contrast: more)') ? 'sí' : 'no'),
+      'Wake Lock (pantalla encendida): ' + (!('wakeLock' in navigator) ? 'NO disponible' : wake ? 'activo' : 'disponible (se pide al abrir un campo completo)'),
+      'Hora: ' + new Date().toISOString()
+    ];
+    $('env').textContent = lines.join('\n');
+  }
+  refreshEnv();
+})();
+</script>
+</body>
+</html>
