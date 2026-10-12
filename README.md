@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 # Destello·Sync V3.4.2
+=======
+# Destello·Sync V3.4.0
+>>>>>>> f955c88a82162806e95869d026fe464925a7a04f
 
 Sincroniza las pantallas de los teléfonos de un público: cada persona abre una web (sin instalar nada) escaneando un QR y un operador controla colores y
 efectos en tiempo real desde `/master`. WebSocket real (`ws`), estado autoritativo en el servidor, ejecución programada (`executeAt`) con reloj sincronizado,
@@ -43,8 +47,11 @@ node tools/loadtest.js --spawn --clients 1000 --commands 5 --storm 1   # prueba 
 ## Documentación
 
 * `docs/RUTAS.md` — todas las rutas HTTP/WS: método, autenticación, respuestas y errores.
+<<<<<<< HEAD
 * `CHANGELOG.md` y `docs/VERSIONADO.md` — historial de versiones y regla de versionado (cada modificación = versión + nota + ZIP; `npm run release`).
 * `docs/COLOR.md` — por qué blanco/amarillo se ven distintos según el teléfono (gris/marrón en Samsung, iguales en iPhone), modelo colorimétrico, ensayo con `/colores` y ajustes.
+=======
+>>>>>>> f955c88a82162806e95869d026fe464925a7a04f
 * `docs/SINCRONIZACION.md` — qué pasa cuando miles de teléfonos escanean en momentos distintos, fuentes de error, mediciones y operación en estadio.
 * `docs/INFORME_V3.4.0.md` — sincronía: reloj compensado al unirse, dibujo exacto, reloj único entre instancias y telemetría.
 * `docs/INFORME_V3.3.0.md` — efecto «Secuencia de colores» (2–12 colores, segundos por color, ininterrumpida hasta DETENER TODO).

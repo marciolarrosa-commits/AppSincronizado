@@ -163,6 +163,7 @@ test('verificación del despliegue: la versión activa figura en /api/admin/stat
   assert.equal(st.json.version, pkg.version);
   assert.equal((await get(srv.base, '/js/orders.js')).status, 200, 'orders.js (ciclo de vida de órdenes) está publicado');
 });
+<<<<<<< HEAD
 
 test('/colores (calibración de color) se publica sin redirecciones, con su script autorizado por hash y sin depender de sesión ni de Flash', async t => {
   const srv = await startServer(); t.after(srv.stop);
@@ -174,3 +175,5 @@ test('/colores (calibración de color) se publica sin redirecciones, con su scri
     assert.ok(!/script-src[^;]*unsafe-inline/.test(r.headers.get('content-security-policy')));
   }
 });
+=======
+>>>>>>> f955c88a82162806e95869d026fe464925a7a04f

@@ -11,7 +11,10 @@ Todas las respuestas llevan `x-content-type-options`, `x-frame-options: DENY`, `
 | `GET/HEAD /?s=CODIGO&mode=remote` | público (participante) | **Pantalla del participante** (`public/flash.html`, cliente remoto V3). **Es el formato de los QR de V3; se conserva.** | Siempre disponible, no depende del interruptor Flash. |
 | `GET/HEAD /?mode=remote` | público | Igual, sin código (app instalada / PWA: pide el código). `start_url` del manifiesto. | Siempre disponible. |
 | `GET/HEAD /master` (y `/master/`) | público (la página); la autenticación es del API | **Panel del operador** (`public/master.html`). | Sin sesión de operador solo muestra el formulario de ingreso. |
+<<<<<<< HEAD
 | `GET/HEAD /colores` (y `/colores/`, `/colores.html`) | público | **Calibración de color** (`public/colores.html`): escala de blanco atenuado, amarillos, pares blanco/amarillo, campo completo y entorno del teléfono. Autónoma: no abre WebSocket ni usa sesión. | Ver `COLOR.md`. |
+=======
+>>>>>>> f955c88a82162806e95869d026fe464925a7a04f
 | `GET/HEAD /flash` (y `/flash/`, `/flash.html`) | público, **solo si el operador habilitó Flash** | **App Flash anterior** (micrófono + linterna), misma página `flash.html`. Con `?s=CODIGO` abre directamente la vista de activación. | Deshabilitada (por defecto): `403` con la página `flash-disabled.html`, `cache-control: no-store`. |
 | `GET/HEAD /?s=CODIGO` (sin `mode=remote`) | público, igual que `/flash` | Enlaces/QR **antiguos** de la app Flash. | Deshabilitada: `403`. |
 | `GET/HEAD /js/*.js`, `/icons/*.png`, `/favicon.svg`, `/manifest.webmanifest`, `/flash-disabled.html` | público | Archivos estáticos de `public/` (gzip + ETag; `cache-control: no-cache`, se revalidan). | `404` si no existen; `400` si la ruta tiene `..` o `\0`. Los `*.artifact.json` del editor **no** se publican. |
