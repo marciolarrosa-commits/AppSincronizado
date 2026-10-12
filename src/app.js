@@ -232,7 +232,6 @@ function createApp(userConfig = {}, deps = {}) {
     }
     if (clean === '/master') return { file: '/master.html' };
     if (clean === '/colores') return { file: '/colores.html' };            // calibración de color (diagnóstico de pantallas)
-=======
     if (clean === '/flash' || clean === '/flash.html') return { file: '/flash.html', flash: true };
     return { file: clean };
   }
