@@ -18,6 +18,7 @@ async function startServer(overrides = {}, deps = {}) {
       tokenSecret: 'secreto-de-prueba-0123456789abcdef', allowNoOrigin: true, logLevel: 'error',
       heartbeatMs: 3000, helloTimeoutMs: 1500, shutdownGraceMs: 4000, shutdownSpreadMs: 300,
       presenceIntervalMs: 200, presenceTtlMs: 3000, defaultLeadMs: 400, minLeadMs: 100,
+      strobeAllowed: true,          // V4.0 lo desactiva por defecto en producción; las pruebas del efecto strobe lo habilitan explícitamente (eventos.test.js prueba el valor predeterminado)
       ...overrides
     }, { logSink: l => logs.push(l), ...deps });
     const addr = await app.start();

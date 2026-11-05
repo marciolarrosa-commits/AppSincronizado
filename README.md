@@ -1,4 +1,4 @@
-# Destello·Sync V3.5.0
+# Destello·Sync V4.0.0
 
 Sincroniza las pantallas de los teléfonos de un público: cada persona abre una web (sin instalar nada) escaneando un QR y un operador controla colores y
 efectos en tiempo real desde `/master`. WebSocket real (`ws`), estado autoritativo en el servidor, ejecución programada (`executeAt`) con reloj sincronizado,
@@ -6,6 +6,8 @@ reconexión automática y, opcionalmente, Redis/Valkey para varias instancias.
 
 > **Estado honesto**: probado y funcionando en una instancia y en 2 instancias + Redis (ver `docs/CARGA.md`). **No** está validado para 60 000 dispositivos:
 > ese es el objetivo de ingeniería, no una capacidad demostrada. Ver `docs/OPERACION_EVENTO_MASIVO.md`.
+
+**V4.0 — varios eventos desde el mismo sistema**: en `/master` → «Eventos» se crean espectáculos independientes, cada uno con su QR (`/e/CÓDIGO`, descargable en PNG/SVG), colores, secuencias, efectos permitidos y estadísticas; los QR anteriores siguen funcionando. Ver `docs/EVENTOS.md`.
 
 ## Rutas (tabla completa y verificada contra el código: `docs/RUTAS.md`)
 
@@ -42,6 +44,8 @@ node tools/loadtest.js --spawn --clients 1000 --commands 5 --storm 1   # prueba 
 
 ## Documentación
 
+* `docs/EVENTOS.md` — **V4.0: sistema multi-evento** (varios espectáculos independientes, QR `/e/CÓDIGO`, aislamiento, ciclo de vida, API, panel, límites).
+* `docs/INFORME_V4.0.0.md` — V4.0.0: qué se hizo, pruebas ejecutadas, mediciones y **lo no demostrado** (60 000 no lo está).
 * `docs/RUTAS.md` — todas las rutas HTTP/WS: método, autenticación, respuestas y errores.
 * `docs/INFORME_V3.5.0.md` — auditoría y remediación de ciberseguridad (ioredis 6, límites compartidos, tokens revocables, empaquetado seguro, Render): hallazgos, pruebas, configuración y riesgos residuales.
 * `docs/AUDITORIA_SEGURIDAD_V3.4.md` — auditoría de ciberseguridad por revisión de código (10 hallazgos priorizados; sin pruebas de intrusión).

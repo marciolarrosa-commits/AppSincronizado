@@ -23,7 +23,11 @@ function isStateShape(st) {
     Boolean(st.payload) && typeof st.payload === 'object' && !Array.isArray(st.payload) && typeof st.payload.effect === 'string';
 }
 /** Mensaje del canal de pub/sub de una sesión: { k: 'state', s: <estado> }. */
-function isBusMessage(m) { return Boolean(m) && typeof m === 'object' && m.k === 'state' && isStateShape(m.s); }
+function isBusMessage(m) {
+  if (!m || typeof m !== 'object') return false;
+  if (m.k === 'close') return typeof m.reason === 'string' && m.reason.length <= 40;      // V4.0: cierre de la sala (evento desactivado/finalizado/archivado)
+  return m.k === 'state' && isStateShape(m.s);
+}
 
 function ackBucket(absDeviationMs) {
   let i = 0;

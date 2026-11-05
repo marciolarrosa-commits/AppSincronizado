@@ -15,6 +15,7 @@ const { createAuth } = require('./auth');
 const { createStore } = require('./store');
 const { createSessionService, SessionError } = require('./sessions');
 const { createHub } = require('./hub');
+const { createEventService } = require('./events');
 const net = require('net');
 const { KeyedLimiter, SharedLimiter } = require('./ratelimit');
 const { SESSION_RE } = require('./protocol');
@@ -147,6 +148,8 @@ function createApp(userConfig = {}, deps = {}) {
       // el interruptor Flash se refresca con este sondeo (cada 5 s): así no hay una consulta al almacenamiento por cada petición de página
       if (lastStore.ok) { const f = await store.getSetting('flashEnabled'); if (f !== null && f !== undefined) flashEnabled = f === '1'; }
     } catch (e) { lastStore = { ok: false, latencyMs: null, kind: store.kind, error: e.message }; }
+    // V4.0: esta instancia se anuncia en el almacenamiento (el panel general cuenta las instancias vivas; una caída desaparece sola al vencer el aviso).
+    if (lastStore.ok && hub) store.instanceBeat(config.instanceId, { version: VERSION, startedAt, connections: hub.connectionCount, maxConnections: config.maxConnections, status: getHealth().status }).catch(() => {});
     metrics.setGauge('store_up', lastStore.ok ? 1 : 0);
     const skips = metrics.get('ws_backpressure_skips'); slowRecently = skips > lastSlowSkips; lastSlowSkips = skips;
   }
@@ -190,7 +193,8 @@ function createApp(userConfig = {}, deps = {}) {
     metrics.setGauge('clock_offset_ms', Math.round(clock.offsetMs)); metrics.setGauge('clock_store_rtt_ms', Math.round(best.rtt * 10) / 10);
   }
 
-  const hub = createHub({ config, store, metrics, logger, auth, getHealth, clock });
+  const events = createEventService({ config, store, logger, metrics, auth, getHealth });
+  const hub = createHub({ config, store, metrics, logger, auth, getHealth, clock, eventPolicy: id => events.policyFor(id) });
 
   // ------------------------------------------------------------------ utilidades HTTP
   // IP del cliente = clave de los límites y de los logs. Con proxy de confianza se toma la entrada de X-Forwarded-For que agregó NUESTRO proxy (la n-ésima desde
@@ -277,6 +281,7 @@ function createApp(userConfig = {}, deps = {}) {
       if (params.has('s')) return { file: '/flash.html', flash: true };       // enlaces/QR antiguos de la app Flash: /?s=CODIGO
       return { file: '/index.html' };
     }
+    if (/^\/e\/[A-Za-z0-9]{6}$/.test(clean)) return { file: '/flash.html' };              // V4.0: QR de un evento; el cliente lee el código de la ruta. Siempre la misma página: no revela qué eventos existen
     if (clean === '/master') return { file: '/master.html' };
     if (clean === '/colores') return { file: '/colores.html' };            // calibración de color (diagnóstico de pantallas)
     if (clean === '/flash' || clean === '/flash.html') return { file: '/flash.html', flash: true };
@@ -396,6 +401,33 @@ function createApp(userConfig = {}, deps = {}) {
         }
         return sendJson(req, res, 200, { sessionId: id, exists: true });    // el público solo puede saber si la sesión existe
       }
+    }
+
+    // ---------------------------------------------------------------- eventos (V4.0; solo operador)
+    const evm = p.match(/^\/api\/events(?:\/(dashboard|ev_[0-9a-f]{16})(?:\/(update|status|duplicate|archive|restore|master-token|stats|audit))?)?$/);
+    if (evm) {
+      const op = requireOperator(req); const actor = 'op:' + op.jti;        // identifica la sesión de operador (no a la persona: hoy hay una sola contraseña compartida; ver docs/SEGURIDAD.md)
+      const base = baseUrl(req); const id = evm[1]; const action = evm[2];
+      if (!id) {
+        if (m === 'GET') return sendJson(req, res, 200, { events: await events.list(base, { includeArchived: u.searchParams.get('archived') === '1' }) });
+        if (m === 'POST') return sendJson(req, res, 201, { event: await events.create(base, await readJson(req, 16384), actor) });
+      } else if (id === 'dashboard') {
+        if (m === 'GET' && !action) return sendJson(req, res, 200, await events.dashboard(base));
+      } else if (!action) {
+        if (m === 'GET') return sendJson(req, res, 200, { event: await events.get(base, id) });
+      } else if (m === 'GET') {
+        if (action === 'stats') return sendJson(req, res, 200, await events.stats(id));
+        if (action === 'audit') return sendJson(req, res, 200, { audit: await events.auditLog(id, Number(u.searchParams.get('limit')) || 100) });
+      } else if (m === 'POST') {
+        const body = await readJson(req, 16384);
+        if (action === 'update') return sendJson(req, res, 200, { event: await events.update(base, id, body, actor) });
+        if (action === 'status') return sendJson(req, res, 200, { event: await events.setStatus(base, id, body.status, actor) });
+        if (action === 'duplicate') return sendJson(req, res, 201, { event: await events.duplicate(base, id, actor) });
+        if (action === 'archive') return sendJson(req, res, 200, { event: await events.archive(base, id, body.confirm, actor) });
+        if (action === 'restore') return sendJson(req, res, 200, { event: await events.restore(base, id, actor) });
+        if (action === 'master-token') return sendJson(req, res, 200, await events.mintMasterToken(base, id, actor));
+      }
+      return sendJson(req, res, 404, { error: 'NOT_FOUND' });
     }
 
     // Interruptor de la app Flash (solo operador). La URL pública de la app Flash es /flash; el QR lo arma el panel con un código propio.
@@ -540,7 +572,7 @@ function createApp(userConfig = {}, deps = {}) {
     logger.info('shutdown_done', { remaining: hub.connectionCount });
   }
 
-  return { config, server, wss, hub, store, metrics, auth, sessions, logger, clock, start, shutdown, getHealth, refreshSecurityState, address: () => server.address() };
+  return { config, server, wss, hub, store, metrics, auth, sessions, events, logger, clock, start, shutdown, getHealth, refreshSecurityState, address: () => server.address() };
 }
 
 module.exports = { createApp, normalizeIp };

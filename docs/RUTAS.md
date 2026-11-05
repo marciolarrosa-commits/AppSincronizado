@@ -14,6 +14,7 @@ Todas las respuestas llevan `x-content-type-options`, `x-frame-options: DENY`, `
 | `GET/HEAD /colores` (y `/colores/`, `/colores.html`) | público | **Calibración de color** (`public/colores.html`): escala de blanco atenuado, amarillos, pares blanco/amarillo, campo completo y entorno del teléfono. Autónoma: no abre WebSocket ni usa sesión. | Ver `COLOR.md`. |
 | `GET/HEAD /flash` (y `/flash/`, `/flash.html`) | público, **solo si el operador habilitó Flash** | **App Flash anterior** (micrófono + linterna), misma página `flash.html`. Con `?s=CODIGO` abre directamente la vista de activación. | Deshabilitada (por defecto): `403` con la página `flash-disabled.html`, `cache-control: no-store`. |
 | `GET/HEAD /?s=CODIGO` (sin `mode=remote`) | público, igual que `/flash` | Enlaces/QR **antiguos** de la app Flash. | Deshabilitada: `403`. |
+| `GET/HEAD /e/<CÓDIGO>` (6 caracteres) | público (participante) | **V4.0 — QR de un evento.** Misma pantalla del participante (`flash.html`); el cliente toma el código de la ruta. **Siempre responde 200 con la misma página, exista o no el evento** (no revela qué eventos existen). | Formato distinto de 6 caracteres → `404`. Ver `EVENTOS.md`. |
 | `GET/HEAD /js/*.js`, `/icons/*.png`, `/favicon.svg`, `/manifest.webmanifest`, `/flash-disabled.html` | público | Archivos estáticos de `public/` (gzip + ETag; `cache-control: no-cache`, se revalidan). | `404` si no existen; `400` si la ruta tiene `..` o `\0`. Los `*.artifact.json` del editor **no** se publican. |
 
 > `flash.html` es un único archivo: contiene la app Flash y el cliente remoto de V3 (el que se validó en dos iPhone). No se separó para no tocar ese cliente. Por eso el interruptor controla las **direcciones de entrada** (`/flash`, `/?s=`), no los bytes del archivo; la app Flash es 100 % del lado del cliente (no usa el servidor) y no expone nada sensible.
@@ -43,6 +44,17 @@ Todas las respuestas llevan `x-content-type-options`, `x-frame-options: DENY`, `
 | `OPTIONS *` | — | `204` con CORS solo para los orígenes de `ALLOWED_ORIGINS` | Sin origen permitido no se agrega `access-control-allow-origin`. |
 
 Tokens: el **operador** (`POST /api/master/login`, vigencia `OPERATOR_TOKEN_TTL_S`) puede usar toda la API; el **Master de sesión** (`masterToken`, vigencia `MASTER_TOKEN_TTL_S`, ligado a UNA sesión y a su `epoch`) solo sirve para el WebSocket; los participantes no tienen token. El token de Master **no** es válido como operador (probado en `test/navegacion.test.js`).
+
+## API de eventos (V4.0; solo operador, `Authorization: Bearer`; ver `EVENTOS.md`)
+
+| Método y ruta | Cuerpo → respuesta |
+|---|---|
+| `GET /api/events[?archived=1]` · `POST /api/events` | lista · `{name, description?, startsAt?, config?}` → `201 {event}` |
+| `GET /api/events/dashboard` | panel general (totales, conectados por evento, infraestructura, alertas) |
+| `GET /api/events/:id` · `/stats` · `/audit?limit=` | evento · estadísticas en vivo · registro de acciones |
+| `POST /api/events/:id/update` · `/status` · `/duplicate` · `/archive` · `/restore` · `/master-token` | editar · cambiar estado · duplicar · archivar (`{confirm: código}`) · restaurar · token de Master del evento |
+
+`:id` = `ev_` + 16 hex (interno; **no** es el del QR). Códigos de error y transiciones en `EVENTOS.md`. Cuerpos de hasta 16 KB.
 
 ## WebSocket
 

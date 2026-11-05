@@ -12,6 +12,10 @@ function createMemoryStore(config) {
   const rates = new Map();        // clave -> { start, n, windowMs }: contadores de los límites de frecuencia
   const revoked = new Map();      // jti de tokens de operador revocados -> vencimiento (s)
   const ttl = config.sessionTtlS * 1000;
+  const events = new Map();       // id -> { rev, ev }
+  const eventCodes = new Map();   // código público -> id
+  const audits = new Map();       // id -> entradas (acotado)
+  const instances = new Map();    // instanceId -> { info, exp }
   let sweeper = null;
 
   function live(id) {
@@ -69,6 +73,25 @@ function createMemoryStore(config) {
     },
     async commandHistorySize(id) { const s = live(id); return s ? s.cmds.size : 0; },
     async deleteSession(id) { sessions.delete(id); presence.delete(id); },
+    // ---- eventos (V4.0): el código público de un evento es único; la actualización es optimista (rev) para que dos operadores no se pisen
+    async eventCreate(ev) {
+      if (eventCodes.has(ev.code) || events.has(ev.id)) return false;
+      eventCodes.set(ev.code, ev.id); events.set(ev.id, { rev: 1, ev: { ...ev, rev: 1 } }); return true;
+    },
+    async eventGet(id) { const e = events.get(id); return e ? { ...e.ev, rev: e.rev } : null; },
+    async eventGetByCode(code) { const id = eventCodes.get(code); return id ? this.eventGet(id) : null; },
+    async eventUpdate(id, ev, expectedRev) {
+      const e = events.get(id); if (!e || e.rev !== expectedRev) return null;
+      e.rev += 1; e.ev = { ...ev, rev: e.rev }; return { ...e.ev };
+    },
+    async eventList(limit = 500) { return [...events.values()].map(e => ({ ...e.ev, rev: e.rev })).sort((a, b) => b.createdAt - a.createdAt).slice(0, limit); },
+    async eventAuditAdd(id, entry) { let a = audits.get(id); if (!a) { a = []; audits.set(id, a); } a.unshift(entry); if (a.length > 300) a.length = 300; },
+    async eventAuditList(id, limit = 100) { return (audits.get(id) || []).slice(0, limit); },
+    // Cierra la sala en TODAS las instancias que tengan participantes de esa sesión (aquí, solo esta).
+    async publishClose(id, reason) { const msg = { k: 'close', reason }; for (const fn of handlers.get(id) || []) { try { fn(msg); } catch { /* aislado */ } } },
+    async instanceBeat(instanceId, info) { instances.set(instanceId, { info, exp: Date.now() + config.presenceTtlMs * 3 }); },
+    async instanceList() { const now = Date.now(); const out = []; for (const [k, v] of instances) { if (v.exp < now) instances.delete(k); else out.push({ instanceId: k, ...v.info }); } return out; },
+
     async rotateEpoch(id) { const s = live(id); if (!s) return null; s.epoch += 1; return s.epoch; },
     async setStrobe(id, enabled) { const s = live(id); if (!s) return false; s.strobeEnabled = Boolean(enabled); return true; },
 

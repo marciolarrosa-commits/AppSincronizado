@@ -16,13 +16,14 @@ const CLOSE = {
   DEVICE_REPLACED: 4002,  // el mismo dispositivo abrió otra conexión: no reintentar
   RATE_LIMITED: 4429,
   HELLO_TIMEOUT: 4408,
-  SLOW: 4413              // consumidor demasiado lento
+  SLOW: 4413,             // consumidor demasiado lento
+  EVENT_ENDED: 4410       // el evento terminó o se archivó: el cliente NO debe reintentar (a diferencia de 4404, que espera al operador)
 };
 
 const rid = n => crypto.randomBytes(n).toString('hex');
 const nowMs = () => Date.now();
 
-function createHub({ config, store, metrics, logger, auth, getHealth, clock }) {
+function createHub({ config, store, metrics, logger, auth, getHealth, clock, eventPolicy }) {
   const nowMs = () => (clock ? clock.now() : Date.now());          // hora de servidor (única entre instancias cuando hay almacenamiento compartido)
   const rooms = new Map();
   const buckets = Array.from({ length: Math.max(1, Math.round(config.heartbeatMs / 1000)) }, () => new Set());
@@ -133,7 +134,29 @@ function createHub({ config, store, metrics, logger, auth, getHealth, clock }) {
     finally { reconcileBusy = false; }
   }
 
+  // V4.0: cierre controlado de una sala por decisión del operador (evento desactivado, finalizado, cancelado o archivado). Llega por el bus (todas las instancias).
+  // 'ENDED' = definitivo (4410, el cliente no reintenta); 'DEACTIVATED' = pausa (4404, el cliente espera y reintenta). El cierre se reparte en lotes para no
+  // producir una avalancha de bajas ni de reintentos simultáneos.
+  function closeRoom(room, reason) {
+    const code = reason === 'ENDED' ? CLOSE.EVENT_ENDED : CLOSE.NOT_FOUND;
+    const text = reason === 'ENDED' ? 'EVENT_ENDED' : 'SESSION_NOT_FOUND';
+    const all = [...room.masters, ...room.publics.values()];
+    metrics.inc('rooms_closed_by_operator'); logger.info('room_closed', { sessionId: room.id, reason, connections: all.length });
+    let i = 0;
+    const step = () => {
+      const end = Math.min(all.length, i + config.broadcastChunk);
+      for (; i < end; i++) {
+        const c = all[i];
+        send(c, P.server.error(text, reason === 'ENDED' ? 'El evento terminó' : 'El evento no está activo'));
+        closeConn(c, code, text);
+      }
+      if (i < all.length) setImmediate(step);
+    };
+    step();
+  }
+
   function onBus(room, msg) {
+    if (msg && msg.k === 'close') return closeRoom(room, msg.reason);
     if (!msg || msg.k !== 'state' || !msg.s) return;
     const st = msg.s;
     syncIncarnation(room, st.incarnation);
@@ -369,7 +392,8 @@ function createHub({ config, store, metrics, logger, auth, getHealth, clock }) {
       serverTimestamp: nowMs(), sessionId: sess.id, role: conn.role, deviceId: conn.deviceId,
       state: room.latest,
       config: {
-        heartbeatMs: config.heartbeatMs, clockPingIntervalMs: config.clockPingIntervalMs, onTimeToleranceMs: config.onTimeToleranceMs,
+        heartbeatMs: config.heartbeatMs, clockPingIntervalMs: config.clockPingIntervalMs,
+        clockBurstCount: config.clockBurstCount, clockBurstCountResync: config.clockBurstCountResync, clockBurstWindowMs: config.clockBurstWindowMs, onTimeToleranceMs: config.onTimeToleranceMs,
         minLeadMs: config.minLeadMs, maxStrobeHz: config.maxStrobeHz, strobeEnabled: sess.strobeEnabled && config.strobeAllowed,
         strobeAllowed: config.strobeAllowed, maxStrobeDurationMs: config.maxStrobeDurationMs
       },
@@ -394,6 +418,10 @@ function createHub({ config, store, metrics, logger, auth, getHealth, clock }) {
     if (!sess) return reject(conn, 'SESSION_NOT_FOUND', CLOSE.NOT_FOUND, 'La sesión terminó', P.safeCommandId(msg.commandId));
     if (sess.epoch !== conn.epoch) { metrics.inc('unauthorized_master'); return reject(conn, 'UNAUTHORIZED', CLOSE.UNAUTHORIZED, 'Token revocado', P.safeCommandId(msg.commandId)); }
     room.strobeEnabled = sess.strobeEnabled;
+    // V4.0: si la sesión pertenece a un EVENTO, el servidor valida que siga activo y que el efecto esté permitido en él. Nunca se confía en nada que envíe el cliente:
+    // la sesión sale del token del Master ya verificado, y el evento se busca por ese código en el almacenamiento.
+    const policy = eventPolicy ? await eventPolicy(conn.sessionId) : null;
+    if (policy && !policy.active) { metrics.inc('commands_event_inactive'); return reject(conn, 'EVENT_NOT_ACTIVE', CLOSE.NOT_FOUND, 'El evento no está activo', P.safeCommandId(msg.commandId)); }
 
     try {
       if (msg.type === 'setConfig') {
@@ -418,6 +446,7 @@ function createHub({ config, store, metrics, logger, auth, getHealth, clock }) {
       } else {
         if (!conn.cmdLimiter.take()) { metrics.inc('rate_limited_commands'); throw new P.ProtocolError('RATE_LIMITED', 'Demasiadas órdenes por segundo'); }
         cmd = P.validateCommand(msg, limits);
+        if (policy && !policy.effectsAllowed.includes(cmd.payload.effect)) { metrics.inc('commands_effect_not_allowed'); throw new P.ProtocolError('EFFECT_NOT_ALLOWED', 'Este evento no permite el efecto «' + cmd.payload.effect + '»'); }
         if (cmd.payload.effect === 'strobe' && !(sess.strobeEnabled && config.strobeAllowed)) throw new P.ProtocolError('STROBE_DISABLED', 'El strobe está deshabilitado: habilitalo en el panel confirmando la advertencia');
         if (cmd.payload.effect === 'sequence') {
           // Un paso de menos de 1 s equivale a un parpadeo (hasta 2 Hz): se trata como strobe (habilitación explícita con la advertencia) y nunca supera la frecuencia máxima.
@@ -427,7 +456,7 @@ function createHub({ config, store, metrics, logger, auth, getHealth, clock }) {
         }
         commandId = cmd.commandId || 'c' + rid(8);
         payload = cmd.payload;
-        executeAt = ts + effectiveLead(cmd.leadMs);
+        executeAt = ts + effectiveLead(policy && policy.leadMs ? Math.max(cmd.leadMs == null ? 0 : cmd.leadMs, policy.leadMs) : cmd.leadMs);      // el margen del evento es un mínimo
       }
       const t0 = nowMs();
       const res = await store.applyState(conn.sessionId, { commandId, executeAt, serverTimestamp: ts, payload });

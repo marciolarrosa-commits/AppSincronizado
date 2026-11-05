@@ -120,6 +120,33 @@ Informe completo con comandos y resultados: `INFORME_V3.5.0.md`. Hallazgos de pa
 * Los logs redactan por **nombre de campo y por valor** (tokens, `Bearer`, `Basic`, credenciales en URLs), neutralizan caracteres de control (sin falsificar líneas) y registran siempre una IP **válida y normalizada** (una cabecera `X-Forwarded-For` hostil no entra). `x-request-id` solo se refleja con formato válido.
 * **ZIP de releases** (`tools/release.js`): versionado por Git + lista de raíces permitidas + lista de denegación (`.env*`, `.npmrc`, claves, certificados, volcados, logs, copias, comprimidos, metadatos locales) + **escaneo de contenido** (claves privadas y tokens conocidos → aborta sin escribir nada). Límites: patrones conocidos, no garantía; revisar el diff antes de publicar. Probado con archivos señuelo.
 
+## Auditoría V4.0 (multi-evento)
+
+Revisión por lectura de código y pruebas automáticas; **no** es una auditoría externa ni una prueba de intrusión.
+
+| Área | Resultado | Cómo se verificó |
+|---|---|---|
+| Aislamiento entre eventos | La sala, el canal Redis, el estado, las versiones, la presencia y los permisos de efectos son por código de evento; el servidor no usa ningún identificador enviado por el cliente para decidir a qué evento pertenece una orden (sale del token de Master verificado y se revalida contra el evento en el almacenamiento). | `test/eventos.test.js` («AISLAMIENTO…», «política del evento…»), `test/eventos-redis.test.js`. |
+| Autorización de la API de eventos | Todas las rutas `/api/events/*` exigen token de operador (401 sin él). El token de Master de sesión **no** vale como operador. | `test/eventos.test.js`. |
+| Enumeración de QR | `/e/<código>` devuelve siempre la misma página; `hello` a un código inexistente cuenta contra el límite de uniones fallidas por IP. Espacio 32⁶. | `test/eventos.test.js` («QR…»). **Límite:** el QR es público por diseño; un NAT de estadio comparte IP. |
+| Suplantación de código | Una sesión suelta no puede ocupar el código de un evento (409); los códigos de evento son únicos y atómicos (Lua), también entre instancias. | `test/eventos*.test.js` (40 altas concurrentes en 2 instancias sin repetidos). |
+| Entradas de la API | Validación estricta y con lista blanca (nombre, fechas, colores `#RRGGBB`, pasos, efectos); campos desconocidos rechazados; cuerpos ≤ 16 KB; `Content-Type: application/json` obligatorio; `Sec-Fetch-Site: cross-site` rechazado. | `test/eventos.test.js`, `test/seguridad-http.test.js`. |
+| CSRF | No hay cookies de sesión: la autorización va en `Authorization: Bearer`, y las peticiones «simples» entre sitios se rechazan (415/403). | pruebas existentes + diseño. |
+| XSS | El panel y `events-panel.js` escriben todo texto dinámico con `textContent` (nombre, descripción, auditoría); no hay `innerHTML`. La CSP sigue siendo por hash. El E2E en Chrome real comprueba que el panel funciona bajo la CSP sin errores. | `e2e/eventos.test.js`. |
+| SSRF | El servidor **no realiza peticiones salientes** a destinos controlados por el usuario (solo Redis, por `REDIS_URL` de configuración). | lectura (`grep` de `http`/`https`/`fetch`/`child_process` en `src/`). |
+| Inyección en Redis/Lua | Los scripts Lua reciben los datos como `ARGV` (no se concatenan en el código); el JSON del evento se guarda como valor. | lectura de `src/store/redis.js`. |
+| Redis como frontera | El canal valida la forma del mensaje (estado o `close` con motivo acotado); un mensaje inválido se descarta y se registra sin volcar el contenido. | prueba existente «Redis como frontera de confianza…» + `isBusMessage` (ahora admite también `close`). |
+| Registros | Las acciones de evento registran `eventId`, acción y sesión de operador (`op:<jti>`); nunca tokens ni contraseñas (el logger redacta por nombre y por forma de valor). | `test/logger.test.js`. |
+| Fotosensibilidad | `STROBE_ALLOWED=false` **por defecto** (antes `true`); un evento no puede incluir `strobe` en `effectsAllowed` mientras esté deshabilitado, y el servidor rechaza cualquier orden `strobe` o secuencia con pasos < 1 s. | `test/eventos.test.js`, `test/seguridad.test.js`, `test/secuencia.test.js`. |
+| Dependencias | `npm audit --omit=dev`: **0 vulnerabilidades** en producción (`ws`, `ioredis`). `npm audit` completo: 1 alta en `zod` (dependencia transitiva de `puppeteer-core`, **solo pruebas**, no entra en el ZIP ni en producción; no se actualizó para no alterar la herramienta de pruebas). | `npm audit` el 2026-11-05. |
+| HTTPS / Origin / roles | Sin cambios: HTTPS obligatorio en producción, validación de `Origin` en el WebSocket y separación operador/Master/participante. | pruebas existentes. |
+
+### Pendiente en V4.0 (pedido y **no** implementado)
+
+* **MFA para administradores.**
+* **Cuentas de operador individuales y permisos por evento** (que un operador solo administre los eventos que tiene autorizados). Hoy hay **una contraseña compartida** (`MASTER_PASSWORD`) y cualquier operador autenticado administra todos los eventos; la auditoría identifica la **sesión de operador**, no a la persona. Requiere un almacén de usuarios (con hash de contraseña lento y segundo factor), asociar operadores a eventos y un cambio en el login: es un cambio de contrato de autenticación que conviene diseñar y probar aparte antes de un evento real.
+* Revisión de la configuración real de Render (variables, red privada del Key Value, `autoDeployTrigger`) y del Key Value de pago: **no verificable desde el repositorio**.
+
 ### Riesgos residuales (no resueltos o no verificables)
 
 1. **Contraseña única compartida** del operador (sin usuarios ni MFA) y tokens en `sessionStorage` del navegador (un XSS los robaría; el panel no tiene sinks de HTML).

@@ -25,6 +25,9 @@ function createSessionService({ config, store, auth }) {
   return {
     joinUrl,
     async create(baseUrl, requestedId) {
+      // V4.0: el código de un evento está reservado (sea cual sea su estado): una sesión suelta no puede ocuparlo ni suplantar la de un QR de evento.
+      const reserved = async code => Boolean(store.eventGetByCode && await store.eventGetByCode(code));
+      if (requestedId && await reserved(requestedId)) throw new SessionError('SESSION_EXISTS', 409, 'La sesión ya existe');
       if ((await store.countSessions()) >= config.maxSessions) throw new SessionError('TOO_MANY_SESSIONS', 429, 'Se alcanzó el máximo de sesiones activas');
       if (requestedId) {
         // Re-crear una sesión con el mismo código (p. ej. tras un reinicio sin almacenamiento compartido) para que los teléfonos ya conectados la retomen.
@@ -35,7 +38,9 @@ function createSessionService({ config, store, auth }) {
         return { sessionId: rec.id, joinUrl: joinUrl(baseUrl, rec.id), masterToken: t.token, masterTokenExpiresAt: t.expiresAt, state: rec.state, strobeEnabled: rec.strobeEnabled };
       }
       for (let i = 0; i < 20; i++) {
-        const rec = await store.createSession(genCode());
+        const candidate = genCode();
+        if (await reserved(candidate)) continue;
+        const rec = await store.createSession(candidate);
         if (rec) {
           const t = auth.issueMasterToken(rec.id, rec.epoch);
           return { sessionId: rec.id, joinUrl: joinUrl(baseUrl, rec.id), masterToken: t.token, masterTokenExpiresAt: t.expiresAt, state: rec.state, strobeEnabled: rec.strobeEnabled };

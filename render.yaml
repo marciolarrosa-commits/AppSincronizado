@@ -23,6 +23,8 @@ services:
       # URL pública CANÓNICA (enlace del QR, CSP y validación de Origin): PUBLIC_BASE_URL (solo origen https, p. ej. la URL del servicio o su dominio propio). Si no se define en
       # producción se usa RENDER_EXTERNAL_URL, que Render proporciona. Con un dominio propio DEBE definirse PUBLIC_BASE_URL (si no, los WebSockets desde ese dominio se rechazan).
       # ALLOWED_ORIGINS (opcional): orígenes https adicionales separados por comas; sin comodines. No se incluyen valores de ejemplo a propósito.
+      - key: STROBE_ALLOWED            # V4.0: «false» es también el valor predeterminado del código. Solo «true» si un evento autoriza expresamente efectos intermitentes (fotosensibilidad).
+        value: "false"
       - key: SHUTDOWN_GRACE_MS         # Render envía SIGTERM y espera 30 s por defecto
         value: "25000"
       - key: REDIS_URL                 # estado compartido (necesario para >1 instancia). Quitar este bloque para usar memoria (una sola instancia)

@@ -66,6 +66,23 @@ redis.call('ZADD', KEYS[4], ARGV[2], ARGV[1])
 return 1
 `;
 
+// Alta atómica de un evento: el código público (que es también el código de sesión) es único. KEYS: 1 evento (hash) · 2 código -> id · 3 índice (zset). ARGV: id, code, json, createdAt.
+const EVENT_CREATE_LUA = `
+if redis.call('EXISTS', KEYS[2]) == 1 or redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
+redis.call('SET', KEYS[2], ARGV[1])
+redis.call('HSET', KEYS[1], 'rev', '1', 'json', ARGV[3])
+redis.call('ZADD', KEYS[3], ARGV[4], ARGV[1])
+return 1
+`;
+// Actualización optimista: solo si la revisión coincide con la leída (dos operadores no se pisan). KEYS: 1 evento. ARGV: revisión esperada, json.
+const EVENT_UPDATE_LUA = `
+local rev = redis.call('HGET', KEYS[1], 'rev')
+if (not rev) or rev ~= ARGV[1] then return nil end
+local n = tonumber(rev) + 1
+redis.call('HSET', KEYS[1], 'rev', tostring(n), 'json', ARGV[2])
+return n
+`;
+
 function createRedisStore(config, logger) {
   const Redis = require('ioredis');
   const p = config.redisPrefix;
@@ -74,6 +91,8 @@ function createRedisStore(config, logger) {
   const cmd = new Redis(config.redisUrl, opts);
   const sub = new Redis(config.redisUrl, opts);
   cmd.defineCommand('rateHit', { numberOfKeys: 1, lua: RATE_LUA });
+  cmd.defineCommand('eventCreate', { numberOfKeys: 3, lua: EVENT_CREATE_LUA });
+  cmd.defineCommand('eventUpdate', { numberOfKeys: 1, lua: EVENT_UPDATE_LUA });
   let lastBadBusAt = 0;
   const handlers = new Map();   // id -> Set<fn>
   let lastError = null;
@@ -110,6 +129,11 @@ function createRedisStore(config, logger) {
   const kCmdZ = id => `${p}cmdz:${id}`;
   const maxHist = config.maxCommandHistory || 500;
   const idxKey = `${p}sessions`;
+  const kEv = id => `${p}ev:${id}`; const kEvCode = c => `${p}evcode:${c}`; const kEvAudit = id => `${p}evaudit:${id}`; const kEvIdx = `${p}events`; const kInst = `${p}instances`;
+  function evView(h) {
+    if (!h || !h.json) return null;
+    try { const ev = JSON.parse(h.json); ev.rev = Number(h.rev); return ev && typeof ev === 'object' && ev.id ? ev : null; } catch { return null; }
+  }
 
   function view(h) {
     if (!h || !h.id || !h.state || !h.createdAt) return null;       // registro incompleto (creación interrumpida): equivale a "no existe"
@@ -177,6 +201,34 @@ function createRedisStore(config, logger) {
       return out;
     },
     async deleteSession(id) { await cmd.multi().del(kS(id)).del(kPres(id)).del(kCmd(id)).del(kCmdZ(id)).zrem(idxKey, id).exec(); },
+    // ---- eventos (V4.0). Sin TTL: son datos del operador (el archivado es lógico). La revisión (rev) vive en el hash junto al JSON.
+    async eventCreate(ev) {
+      const ok = await cmd.eventCreate(kEv(ev.id), kEvCode(ev.code), kEvIdx, ev.id, ev.code, JSON.stringify({ ...ev, rev: undefined }), String(ev.createdAt));
+      return ok === 1;
+    },
+    async eventGet(id) { return evView(await cmd.hgetall(kEv(id))); },
+    async eventGetByCode(code) { const id = await cmd.get(kEvCode(code)); return id ? this.eventGet(id) : null; },
+    async eventUpdate(id, ev, expectedRev) {
+      const n = await cmd.eventUpdate(kEv(id), String(expectedRev), JSON.stringify({ ...ev, rev: undefined }));
+      return n ? { ...ev, rev: Number(n) } : null;
+    },
+    async eventList(limit = 500) {
+      const ids = await cmd.zrevrange(kEvIdx, 0, limit - 1); if (!ids.length) return [];
+      const pipe = cmd.pipeline(); for (const id of ids) pipe.hgetall(kEv(id));
+      const rows = await pipe.exec(); return rows.map(r => evView(r[1])).filter(Boolean);
+    },
+    async eventAuditAdd(id, entry) { await cmd.multi().lpush(kEvAudit(id), JSON.stringify(entry)).ltrim(kEvAudit(id), 0, 299).exec(); },
+    async eventAuditList(id, limit = 100) { const rows = await cmd.lrange(kEvAudit(id), 0, limit - 1); return rows.map(r => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean); },
+    async publishClose(id, reason) { await cmd.publish(kCh(id), JSON.stringify({ k: 'close', reason })); },
+    // Registro de instancias vivas (panel de infraestructura): cada instancia se anuncia con vencimiento; las caídas desaparecen solas.
+    async instanceBeat(instanceId, info) { await cmd.multi().hset(kInst, instanceId, JSON.stringify({ ...info, exp: Date.now() + config.presenceTtlMs * 3 })).pexpire(kInst, config.presenceTtlMs * 30).exec(); },
+    async instanceList() {
+      const h = await cmd.hgetall(kInst); const now = Date.now(); const out = []; const stale = [];
+      for (const [k, v] of Object.entries(h)) { let o = null; try { o = JSON.parse(v); } catch { /* ilegible */ } if (!o || !(o.exp >= now)) stale.push(k); else { delete o.exp; out.push({ instanceId: k, ...o }); } }
+      if (stale.length) cmd.hdel(kInst, ...stale).catch(() => {});
+      return out;
+    },
+
     async rotateEpoch(id) { if (!(await cmd.exists(kS(id)))) return null; return cmd.hincrby(kS(id), 'epoch', 1); },
     async setStrobe(id, enabled) { if (!(await cmd.exists(kS(id)))) return false; await cmd.hset(kS(id), 'strobe', enabled ? '1' : '0'); return true; },
 

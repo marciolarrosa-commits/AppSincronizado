@@ -202,7 +202,14 @@
   }
   // `rtt` (opcional) = mejor RTT conocido: cota del error del reloj (≤ RTT/2). El servidor lo agrega en un histograma para saber qué tan buena es la sincronía del público.
   function sendPing() { rawSend({ protocolVersion: PROTOCOL, type: 'ping', t0: perfNow(), rtt: isFinite(S.clock.bestRtt) ? Math.round(S.clock.bestRtt) : undefined }); }
-  function clockBurst() { for (var i = 0; i < 6; i++) setTimeout(sendPing, i * 120); }
+  // V4.0: medición inicial repartida. Antes: 6 pings separados 120 ms al recibir el welcome (todos los teléfonos a la vez: 60 000 × 6 = 360 000 pings en ~0,6 s tras una
+  // reconexión masiva). Ahora: n pings (3 al unirse; 1 si el reloj ya estaba sincronizado) en una ventana de `clockBurstWindowMs` (3 s): cada ping cae en su propia franja
+  // de win/n con instante aleatorio dentro de ella, así la carga se reparte en el tiempo y los pings de un mismo teléfono no quedan pegados.
+  function clockBurst(resync) {
+    var c = S.config, n = resync ? (c.clockBurstCountResync != null ? c.clockBurstCountResync : 1) : (c.clockBurstCount || 3), win = c.clockBurstWindowMs || 3000;
+    (S.burstTimers || []).forEach(clearTimeout); S.burstTimers = [];
+    for (var i = 0; i < n; i++) S.burstTimers.push(setTimeout(sendPing, (i + Math.random()) * (win / n)));
+  }
 
   // ---------------------------------------------------------------- aplicación de estados
   function onState(st, meta) {
@@ -359,7 +366,7 @@
           setConn('● CONECTADO', true); setBanner(null);
           S.lastVersion = -1;                                         // la bienvenida es autoritativa (también tras un reinicio del servidor)
           onState(m.state, { initial: true });
-          clockBurst();
+          clockBurst(est.source === 'previa');
           clearTimeout(S.pingTimer);
           schedulePing();
           break;
@@ -380,6 +387,7 @@
       log('cerrado', ev.code, ev.reason);
       if (S.closedByUser) return;
       if (ev.code === 4002) { S.fatal = 'Esta sesión se abrió en otra pestaña de este dispositivo.'; setConn('● PESTAÑA DUPLICADA', false); setBanner(S.fatal, 'Pestaña duplicada'); return; }
+      if (ev.code === 4410) { S.fatal = 'El evento terminó. Gracias por participar.'; setConn('● EVENTO FINALIZADO', false); setBanner(S.fatal, 'Evento finalizado'); return; }
       if (ev.code === 4404) { setConn('● ESPERANDO AL OPERADOR', false); setBanner('La sesión no está activa. Esperando que el operador la retome…', 'Esperando al operador'); return scheduleReconnect(5000 + Math.random() * 10000, '4404'); }
       if (ev.code === 4429) return scheduleReconnect(10000 + Math.random() * 20000, 'rate');
       scheduleReconnect(undefined, 'close ' + ev.code);
@@ -405,7 +413,7 @@
     if (document.hidden) return;
     ensureLoop(); requestWakeLock();
     if (!S.connected && !connecting() && !S.closedByUser && !S.fatal) { clearTimeout(S.reconnectTimer); S.reconnectTimer = null; S.reconnectTimer = setTimeout(function () { S.reconnectTimer = null; connect(); }, Math.random() * 800); }
-    else if (S.connected) clockBurst();
+    else if (S.connected) clockBurst(true);
   }
   function onOnline() { if (!S.connected && !connecting() && !S.closedByUser && !S.fatal) { clearTimeout(S.reconnectTimer); S.reconnectTimer = setTimeout(function () { S.reconnectTimer = null; connect(); }, Math.random() * 1000); } }
   // Mantener la pantalla encendida: sin esto Android ATENÚA la pantalla antes de apagarla (blanco -> gris, amarillo -> marrón) aunque la página pinte el

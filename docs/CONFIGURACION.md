@@ -55,7 +55,11 @@ Todo sale de variables de entorno (`src/config.js`). **Ningún secreto está en 
 | `COMMAND_MIN_LEAD_MS` / `COMMAND_MAX_LEAD_MS` | 300 / 8000 | Límites del margen. El margen efectivo es ≥ 2 × p95 de difusión + 250 ms. |
 | `ON_TIME_TOLERANCE_MS` | 100 | Tolerancia para contar una aplicación como "a tiempo". |
 | `ACK_TARGET_PER_COMMAND` | 500 | Confirmaciones de aplicación deseadas por orden (`ackRate = min(1, 500/audiencia)`). |
-| `STROBE_ALLOWED` | true | Interruptor general: `false` impide habilitar strobe en cualquier sesión. |
+| `STROBE_ALLOWED` | **false** (V4.0; antes `true`) | Interruptor general de fotosensibilidad: con `false` no se puede habilitar el strobe ni una secuencia con pasos < 1 s en ninguna sesión ni evento. Un evento que lo autorice expresamente exige `STROBE_ALLOWED=true` **y** habilitarlo en la sesión confirmando la advertencia. **Cambio de comportamiento respecto de V3.x**: quien lo usaba sin definir la variable debe definirla. |
+| `CLOCK_BURST_COUNT` | 3 (1–6) | V4.0: pings de reloj que cada teléfono envía al unirse (antes 6 fijos, separados 120 ms). Viaja en el `welcome`. |
+| `CLOCK_BURST_COUNT_RESYNC` | 1 (0–6) | Pings al reconectar con el reloj ya sincronizado y al volver a primer plano. |
+| `CLOCK_BURST_WINDOW_MS` | 3000 (200–30000) | Ventana en la que se reparten, con instante aleatorio, los pings iniciales de cada teléfono (jitter). |
+| `MAX_EVENTS` | 200 | V4.0: eventos **no archivados** simultáneos (ver `EVENTOS.md`). |
 | `MAX_STROBE_HZ` | 3 (tope duro 3) | Frecuencia máxima de strobe. |
 | `MAX_STROBE_DURATION_MS` | 30000 (máx 120000) | Duración máxima de un strobe. |
 | `MAX_PULSE_DURATION_MS` | 600000 | Duración máxima de un pulso con límite. |

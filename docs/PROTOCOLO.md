@@ -22,8 +22,10 @@ Respuesta `welcome`:
 ```jsonc
 { "protocolVersion":1, "type":"welcome", "serverTimestamp":1791570000000, "sessionId":"K7M2QD", "role":"public", "deviceId":"...",
   "state": { "commandId":"c9f…", "stateVersion":12, "serverTimestamp":…, "executeAt":…, "payload": {…} },
-  "config": { "heartbeatMs":20000, "clockPingIntervalMs":15000, "onTimeToleranceMs":100, "minLeadMs":300,
-              "maxStrobeHz":3, "strobeEnabled":false, "strobeAllowed":true, "maxStrobeDurationMs":30000 } }
+  "config": { "heartbeatMs":20000, "clockPingIntervalMs":15000,
+              "clockBurstCount":3, "clockBurstCountResync":1, "clockBurstWindowMs":3000,   // V4.0: ráfaga inicial de reloj repartida
+              "onTimeToleranceMs":100, "minLeadMs":300,
+              "maxStrobeHz":3, "strobeEnabled":false, "strobeAllowed":false, "maxStrobeDurationMs":30000 } }   // strobeAllowed=false es el valor predeterminado desde V4.0
 ```
 
 `state` en el `welcome` es el estado **vigente** (autoritativo); el cliente lo toma como nueva línea base de versiones (también tras un reinicio del servidor).
@@ -89,7 +91,8 @@ Strobe bloqueado por defecto: error `STROBE_DISABLED` hasta que el Master lo hab
 | 1008 | violación de protocolo | corregir; no reintentar en bucle |
 | 1009 / 1003 | mensaje demasiado grande / binario | — |
 | 4401 | token inválido, vencido o revocado | Master: pedir token nuevo |
-| 4404 | sesión inexistente o vencida | público: esperar y reintentar despacio; Master: re-crear la sesión con el mismo código |
+| 4404 | sesión inexistente o vencida (o **evento desactivado**, V4.0) | público: esperar y reintentar despacio; Master de sesión suelta: re-crear la sesión con el mismo código; Master de un evento: volver a la lista de eventos |
+| 4410 | **V4.0:** el evento terminó, se canceló o se archivó (`EVENT_ENDED`) | **no** reintentar (el cliente muestra «Evento finalizado») |
 | 4408 | no envió `hello` a tiempo | reconectar |
 | 4413 | consumidor lento (buffer saturado) | reconectar |
 | 4429 | abuso de frecuencia | backoff largo |

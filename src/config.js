@@ -115,6 +115,13 @@ function loadConfig(env = process.env, overrides = {}) {
     helloTimeoutMs: num(env, 'HELLO_TIMEOUT_MS', 5000, { min: 200 }),
     maxMessageBytes: num(env, 'MAX_MESSAGE_BYTES', 2048, { min: 256, max: 65536 }),
     clockPingIntervalMs: num(env, 'CLOCK_PING_INTERVAL_MS', 30000, { min: 1000 }),   // 1 ping por cliente cada ~30 s (±15 %)
+    // V4.0: medición inicial del reloj repartida. Antes: 6 pings por teléfono separados 120 ms desde el welcome (60 000 teléfonos = 360 000 pings en ~0,6 s tras una
+    // reconexión masiva). Ahora: `clockBurstCount` pings, cada uno en su franja con instante aleatorio dentro de `clockBurstWindowMs`; si el teléfono ya tenía el reloj
+    // sincronizado (reconexión) solo envía `clockBurstCountResync`. Los valores viajan en el welcome: se ajustan sin cambiar el cliente.
+    clockBurstCount: num(env, 'CLOCK_BURST_COUNT', 3, { min: 1, max: 6 }),
+    clockBurstCountResync: num(env, 'CLOCK_BURST_COUNT_RESYNC', 1, { min: 0, max: 6 }),
+    clockBurstWindowMs: num(env, 'CLOCK_BURST_WINDOW_MS', 3000, { min: 200, max: 30000 }),
+    maxEvents: num(env, 'MAX_EVENTS', 200, { min: 1 }),                               // eventos NO archivados simultáneos
 
     // Sincronización temporal de las órdenes
     defaultLeadMs: num(env, 'COMMAND_LEAD_MS', 1500, { min: 0, max: 10000 }),
@@ -124,7 +131,8 @@ function loadConfig(env = process.env, overrides = {}) {
     ackTargetPerCommand: num(env, 'ACK_TARGET_PER_COMMAND', 500, { min: 10 }),
 
     // Seguridad visual (fotosensibilidad). Valores conservadores por defecto.
-    strobeAllowed: bool(env, 'STROBE_ALLOWED', true),
+    // V4.0: desactivado por defecto (fotosensibilidad). Un evento que lo autorice expresamente exige STROBE_ALLOWED=true Y habilitarlo en la sesión con la advertencia.
+    strobeAllowed: bool(env, 'STROBE_ALLOWED', false),
     maxStrobeHz: num(env, 'MAX_STROBE_HZ', 3, { min: 0.5, max: 3 }),
     maxStrobeDurationMs: num(env, 'MAX_STROBE_DURATION_MS', 30000, { min: 1000, max: 120000 }),
     maxPulseDurationMs: num(env, 'MAX_PULSE_DURATION_MS', 600000, { min: 1000 }),

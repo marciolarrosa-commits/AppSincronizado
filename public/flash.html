@@ -16,7 +16,7 @@
 <link rel="icon" href="/icons/icon-192.png" type="image/png" sizes="192x192" />
 <script>
   /* Se ejecuta ANTES del primer pintado: si el enlace es del modo remoto (QR), la interfaz de la app original ni se llega a mostrar. */
-  if (/[?&]mode=remote/.test(location.search)) document.documentElement.classList.add('remote-on');
+  if (/[?&]mode=remote/.test(location.search) || /^\/e\/[A-Za-z0-9]{6}\/?$/.test(location.pathname)) document.documentElement.classList.add('remote-on');   /* V4.0: QR de evento /e/CODIGO */
 </script>
 <title>Destello·Sync — flash al ritmo de la música</title>
 <style>
@@ -2785,10 +2785,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     // Length guard BEFORE touching URLSearchParams at all — a crafted link
     // with a huge query string shouldn't get as far as being parsed just to
     // find out its ?s= value is garbage.
-    var rawUrlCode = (location.search.length > 0 && location.search.length <= 100)
+    // V4.0: el QR de un evento es /e/CODIGO (el código de 6 caracteres es el de su sesión); los QR anteriores /?s=CODIGO&mode=remote siguen funcionando.
+    var eventPath = /^\/e\/([A-Za-z0-9]{6})\/?$/.exec(location.pathname);
+    var rawUrlCode = eventPath ? eventPath[1] : (location.search.length > 0 && location.search.length <= 100)
       ? new URLSearchParams(location.search).get('s')
       : null;
-    var urlMode = (location.search.length > 0 && location.search.length <= 100)
+    var urlMode = eventPath ? 'remote' : (location.search.length > 0 && location.search.length <= 100)
       ? new URLSearchParams(location.search).get('mode')
       : null;
     var urlCode = rawUrlCode ? sanitizeSessionCode(rawUrlCode) : null;

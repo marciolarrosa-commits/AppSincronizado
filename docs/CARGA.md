@@ -20,6 +20,8 @@ reconecta a la vez), `--instances` + `--redis` (varias instancias reales compart
 
 **No se ejecutan pruebas masivas contra producción ni contra servicios de terceros.** `--spawn` levanta el servidor localmente.
 
+> **V4.0.0 (2026-11-05):** corrida de regresión de 5 000 clientes, 2 instancias + Redis, reconexión masiva del 100 % — **APROBADA** (`loadtest-results/v4/5000-i2.json`; detalle en `INFORME_V4.0.0.md`). Con la salvedad de la herramienta (generador saturado: latencias no concluyentes). **60 000 sigue sin probarse.**
+
 ## Qué se mide y cómo
 
 | Métrica | Cómo se obtiene |

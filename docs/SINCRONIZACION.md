@@ -29,7 +29,7 @@ Esto se verifica en `e2e/sincronia.test.js` («escanea a mitad de la secuencia»
 | **Instante en que se escanea / carga la página / conecta** | **No** | — | La fase depende solo de la hora de servidor (ver §1). |
 | **Error del reloj estimado al ingresar** | Sí | antes ≈ la demora de bajada (**media 62–126 ms**, hasta 176) durante 0,1–0,35 s; ahora ≈ (subida − bajada)/2 (**2–10 ms**) | V3.4.0: se compensa con el viaje `hello→welcome` (RTT/2); al reconectar se conserva la estimación previa. |
 | **Asimetría de la red** (subida ≠ bajada) | Sí — **límite físico** | error = (subida − bajada)/2, siempre ≤ RTT/2 | No se puede medir desde el teléfono. Se **acota** con el RTT que cada teléfono informa (panel: «Reloj de los teléfonos»). |
-| **Jitter** | Poco | se atenúa quedándose con la muestra de menor RTT de 6–12 pings | Ráfaga de 6 pings al unirse + 1 cada ~30 s. |
+| **Jitter** | Poco | se atenúa quedándose con la muestra de menor RTT de 6–12 pings | V3.x: ráfaga de 6 pings (cada 120 ms) al unirse + 1 cada ~30 s. **V4.0: 3 pings repartidos con jitter en 3 s** al unirse (1 si el reloj ya estaba sincronizado) + 1 cada ~30 s (ver §«Ráfaga inicial de reloj (V4.0)»). |
 | **Dibujo (planificación del cuadro)** | Sí | antes hasta **35 ms** (p95; sondeo a ~30 fps); ahora **≤ 1 cuadro (12–15 ms p95)** | V3.4.0: la secuencia solo dibuja cerca de cada frontera (despierta 40 ms antes y evalúa a 60 fps). |
 | **Relojes de varias instancias del servidor** | Sí si no se corrige | la diferencia entre relojes (decenas–cientos de ms) se sumaba a los teléfonos de esa instancia | V3.4.0: todas las marcas de tiempo salen de la hora del almacenamiento compartido (`Redis TIME`). Probado con +900 / −700 ms. |
 | **Latencia de la pantalla/SO** (8–50 ms según modelo) | Sí | no medible desde la web | Solo con ensayo físico (cámara). |
@@ -77,6 +77,24 @@ Es un **modelo**, no una medición de un estadio: los valores reales dependerán
 4. **Varias instancias ⇒ Redis obligatorio** y `CLOCK_SOURCE=store` (predeterminado). Sin él, cada instancia usa su reloj de sistema (puede diferir).
 5. **Ensayo físico con cámara**: filmar la tribuna (240 fps) en un cambio de color y medir la dispersión visible; registrar modelos de teléfono.
 6. Brillo máximo, sin ahorro de energía (ver `COBERTURA_PANTALLA.md`): el brillo distinto entre teléfonos se percibe más que 30 ms.
+
+## Ráfaga inicial de reloj (V4.0)
+
+**Antes (V3.x)** — al recibir `welcome`, cada teléfono enviaba **6 pings separados 120 ms** (instantes 0, 120, …, 600 ms), todos los teléfonos a la vez. Con 60 000 teléfonos que se unen o reconectan juntos eran **360 000 pings en ~0,6 s**.
+
+**Ahora (V4.0)** — el servidor informa en el `welcome` `clockBurstCount` (3), `clockBurstCountResync` (1) y `clockBurstWindowMs` (3000). El teléfono divide la ventana en `n` franjas y envía **un ping por franja, en un instante aleatorio dentro de ella** (jitter): 3 pings en 3 s al unirse; **1** si conserva la estimación previa del reloj (reconexión: `fromWelcome` devuelve `previa`) o al volver a primer plano. La estimación inicial sigue saliendo del viaje `hello → welcome` (V3.4.0), por lo que el reloj ya es utilizable **antes** del primer ping. El ping periódico (1 cada ~30 s ±15 %) no cambia. Los tres valores se ajustan por variable de entorno sin tocar el cliente (`CONFIGURACION.md`).
+
+**Medición** (`node tools/reloj-rafaga.js`, 60 000 teléfonos a la vez; **modelo**, no medición de campo: retardo mediano 60 ms por sentido, asimetría ±20 %, jitter lognormal):
+
+| Estrategia | Pings totales | Pico de pings/s (ventana de 100 ms) | Error del reloj p50 / p95 / p99 |
+|---|---|---|---|
+| V3.x: 6 pings cada 120 ms | 360 000 | **600 000** | 7,4 / 31,6 / 52,8 ms |
+| 6 pings repartidos en 3 s | 360 000 | 122 540 | 7,4 / 31,3 / 52,3 ms |
+| **V4.0: 3 pings repartidos en 3 s** | **180 000** | **61 390** | 8,3 / 35,8 / 59,7 ms |
+| 2 pings repartidos en 3 s | 120 000 | 41 180 | 8,9 / 38,9 / 64,4 ms |
+| 1 ping | 60 000 | 20 950 | 9,8 / 43,9 / 73,3 ms |
+
+Lectura: el **reparto con jitter** es lo que reduce el pico (≈ 5×: 600 000 → 122 540 con los mismos 6 pings); **bajar a 3 pings** lo reduce otra vez a la mitad (→ 61 390, ≈ 10× menos que antes) a cambio de **≈ +4 ms en p95 y +7 ms en p99** de error de reloj en este modelo (la asimetría de la red, irreducible, domina el error). Es un compromiso elegido, no gratis: si los ensayos de campo mostraran peor sincronía, `CLOCK_BURST_COUNT=6` restituye la precisión sin cambiar el cliente. **No se midió en teléfonos reales ni con red móvil real.**
 
 ## 7. Limitaciones y trabajo futuro
 

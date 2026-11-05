@@ -24,13 +24,28 @@ Otros cuellos de botella a validar en una prueba real:
 * **Límite de archivos abiertos** (`ulimit -n`) del contenedor: verificar ≥ 2 × conexiones por proceso.
 * **Redis**: 2 conexiones por proceso; el plan debe cubrirlas (el gratuito admite 50). Un Redis sin persistencia pierde sesiones al reiniciar.
 
+## Distribución de 60 000 (72 000 de margen) entre instancias — plan a VALIDAR (V4.0)
+
+**Estado: diseño y dimensionamiento de partida; 60 000 NO está demostrado.** Lo que existe y se midió está en `CARGA.md` y en `INFORME_V4.0.0.md`.
+
+* **Una conexión no es costosa en memoria, el envío sí en CPU.** En la corrida de V4 (5 000 clientes, 2 procesos + Redis, reconexión del 100 %) el pico de RSS fue **123 MB por proceso con 2 500 conexiones cada uno** (incluye la línea base del proceso): como **cota superior ≈ 50 KB por conexión** → 60 000 conexiones ≲ 3 GB en total repartidas en N procesos. Es una cota de un equipo Windows con Node 24, no una medición en Linux/Render.
+* **Reparto**: cualquier instancia atiende cualquier teléfono (el estado está en Redis y las salas se suscriben al canal del evento solo donde hay participantes). El balanceo lo hace el balanceador de Render/CDN; **no hay afinidad de sesión** ni hace falta.
+* **Tamaño por instancia (punto de partida a probar)**: apuntar a **≤ 6 000–8 000 conexiones por proceso** (la difusión cuesta ≈ 80–100 µs por envío en Windows; con 8 000 son ≈ 0,7 s de CPU por orden en ese proceso, en lotes de `BROADCAST_CHUNK`). Para 60 000 → **8–10 procesos**; para 72 000 → **10–12**. Ajustar `MAX_CONNECTIONS` por proceso a ≈ 1,25 × lo previsto (el valor por defecto, 20 000, no protege nada a esa escala: a 8 000 conexiones por proceso conviene fijarlo cerca de 10 000 para que `/readyz` saque del balanceador a la instancia saturada).
+* **Eventos simultáneos comparten esas instancias**: la suma de conexiones de todos los eventos activos es lo que cuenta contra `MAX_CONNECTIONS`.
+* **Archivos abiertos / sockets**: `ulimit -n` ≥ 2 × conexiones por proceso (+ margen); verificar en el contenedor real.
+* **Redis**: por proceso hay 2 conexiones (comandos y suscriptor) y **una suscripción por evento con participantes locales** (no por teléfono). Operaciones por orden: 1 `EVAL` atómico + 1 `PUBLISH` (dentro del script) y, si hay Master con estadísticas, lecturas de presencia/acks cada 1 s durante ≤ 20 s; por evento y por instancia, `HSET` de presencia cada ≈ 2 s. **Por teléfono: ninguna.** Cada orden de un evento consulta además el evento (1–2 lecturas) — órdenes humanas, ≤ 5/s por Master. Con `maxmemory-policy noeviction` y datos de evento sin vencimiento, vigilar la memoria (un evento ocupa < 2 KB + auditoría ≤ 300 entradas).
+* **Reconexión masiva**: backoff exponencial con jitter completo en el cliente, cierre escalonado al desplegar (`SHUTDOWN_SPREAD_MS`), `LISTEN_BACKLOG=4096` y —desde V4— la ráfaga de reloj repartida (`CLOCK_BURST_*`): de ≈ 600 000 pings/s de pico (modelo) a ≈ 61 000 pings/s. **Falta** probarlo a escala real en Linux.
+* **Caída de una instancia**: sus teléfonos reconectan (con jitter) a las demás y reciben el estado vigente; la presencia de la instancia vence sola (`PRESENCE_TTL_MS`). Probado con 2 instancias reales (`test/distribucion.test.js`, reinicio de una instancia) — no con una caída durante una orden bajo carga.
+* **Redis lento / caído / reiniciado / Pub/Sub perdido**: probados Redis caído y recuperado, pérdida y recuperación del suscriptor (reconciliación), y el estado de eventos tras reiniciar una instancia (`test/distribucion.test.js`, `test/eventos-redis.test.js`). **No probado**: Redis *lento* (latencia inyectada) ni un reinicio de Redis **con** pérdida de datos durante un evento activo (las sesiones se recrean al operar; los eventos desaparecerían si Redis no persiste: **usar un Key Value con persistencia**).
+
 ## Checklist para un evento real
 
 1. Plan **pago siempre activo** (no Free), ≥ 2 instancias con Redis/Key Value de plan pago (persistencia), `NODE_ENV=production`, `MASTER_PASSWORD` fuerte.
 2. **Prueba de carga previa en la infraestructura real** (Linux, mismo plan, generador distribuido en varias máquinas) hasta ≥ 1,2 × la audiencia esperada, con la misma metodología de `CARGA.md`. Registrar resultados.
 3. Subir `WS_CONNECT_PER_MIN_PER_IP`; elegir `COMMAND_LEAD_MS` ≥ 2 × la duración de difusión medida (empezar en 3 s para audiencias grandes).
 4. Ensayo general en el lugar con ~20 teléfonos reales (iPhone/Android, Wi-Fi y datos): medir desviación visual (OLED/LCD difieren; no se garantiza sincronía perfecta entre paneles).
-5. Aviso de fotosensibilidad al público si se usa strobe; dejarlo **deshabilitado** salvo necesidad.
+5. Aviso de fotosensibilidad al público si se usa strobe; dejarlo **deshabilitado** salvo necesidad (desde V4.0 `STROBE_ALLOWED=false` es el valor predeterminado).
+5b. **Eventos (V4.0)**: crear el evento, configurar colores/secuencias/efectos y **descargar su QR (PNG/SVG)** con antelación; comprobar que el enlace `/e/CÓDIGO` abre en un teléfono; ensayar con un evento **«Ensayo técnico»** distinto del real (el aislamiento garantiza que no se mezclan); **activar** el evento real solo cuando corresponda (hasta entonces el QR responde «esperando al operador»); y **no archivar ni finalizar** hasta terminar (finalizar cierra a todos los teléfonos de forma definitiva).
 6. Un operador con el panel abierto y **otro** con `/master` listo (hasta 3 paneles por sesión); ambos conocen la tecla **Esc** (DETENER TODO).
 7. Congelar despliegues desde 24 h antes. Tener el procedimiento de rollback (`DESPLIEGUE_RENDER.md`) y el plan B (pantalla gigante con música/luces propias) a mano.
 8. Instrucciones a los asistentes: mantener la pantalla encendida y la pestaña en primer plano; iOS/Android **suspenden WebSocket y animaciones** con la pantalla bloqueada o en segundo plano (se usa Wake Lock cuando el navegador lo permite, sin garantía).

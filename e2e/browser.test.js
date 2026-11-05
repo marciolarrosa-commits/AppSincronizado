@@ -213,20 +213,20 @@ test('E2E: si la sesión se pierde y se re-crea con el mismo código con el tel�
   assert.ok(await waitColor(phone.page, [175, 82, 222], 4000), 'el teléfono (que ya había visto la versión 3) acepta la versión 1 de la sesión nueva');
 });
 
-test('E2E carga: el teléfono envía UN ping de reloj por intervalo (antes 3), con la ráfaga inicial de calibración', { skip, timeout: 60000 }, async t => {
-  const srv = await startServer({ wsConnectPerMinPerIp: 100000, clockPingIntervalMs: 2000 }); t.after(srv.stop);
+test('E2E carga: el teléfono envía UN ping de reloj por intervalo (antes 3), con la ráfaga inicial de calibración (V4.0: 3 pings repartidos en la ventana del welcome)', { skip, timeout: 60000 }, async t => {
+  const srv = await startServer({ wsConnectPerMinPerIp: 100000, clockPingIntervalMs: 2000, clockBurstWindowMs: 1000 }); t.after(srv.stop);
   const browser = await launch(); t.after(() => browser.close());
   const op = await login(srv.base); const s = await createSession(srv.base, op);
   const ctx = await browser.createBrowserContext(); const page = await ctx.newPage();
   await page.evaluateOnNewDocument(() => { window.__pings = 0; const o = WebSocket.prototype.send; WebSocket.prototype.send = function (d) { try { if (JSON.parse(d).type === 'ping') window.__pings++; } catch (e) { /* no JSON */ } return o.call(this, d); }; });
   await page.goto(s.joinUrl);
   await page.waitForFunction(() => /CONECTADO/.test(document.getElementById('remote-connection').textContent), { timeout: 8000 });
-  await sleep(1000);                                                       // termina la ráfaga inicial (6 pings)
+  await sleep(1500);                                                       // termina la ráfaga inicial (V4.0: 3 pings repartidos con jitter en la ventana de 1 s que llega en el welcome; antes 6 pings cada 120 ms)
   const a = await page.evaluate(() => window.__pings);
   await sleep(10000);
   const b = await page.evaluate(() => window.__pings);
   const periodic = b - a;
   console.log(`# pings periódicos en 10 s con intervalo de 2 s: ${periodic} (antes: 3 por intervalo = ~15)`);
-  assert.ok(a >= 6, 'ráfaga inicial de calibración del reloj');
+  assert.ok(a >= 3 && a <= 5, 'ráfaga inicial de calibración del reloj: 3 pings (+ a lo sumo 1–2 periódicos): ' + a);
   assert.ok(periodic >= 3 && periodic <= 8, `1 ping por intervalo (±15 %): ${periodic}`);
 });

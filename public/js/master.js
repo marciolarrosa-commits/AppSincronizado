@@ -5,7 +5,9 @@
   'use strict';
   var PROTOCOL = 1;
   var $ = function (id) { return document.getElementById(id); };
-  var PALETTE = ['#FFFFFF', '#FFD400', '#FF9F1C', '#FF3B30', '#34C759', '#00C7BE', '#0A84FF', '#5856D6', '#AF52DE', '#FF2D55', '#7C4DFF', '#000000'];
+  var DEFAULT_PALETTE = ['#FFFFFF', '#FFD400', '#FF9F1C', '#FF3B30', '#34C759', '#00C7BE', '#0A84FF', '#5856D6', '#AF52DE', '#FF2D55', '#7C4DFF', '#000000'];
+  var PALETTE = DEFAULT_PALETTE.slice();
+  var Hooks = window.DestelloMasterHooks = window.DestelloMasterHooks || {};      // V4.0: el panel de eventos (events-panel.js, cargado ANTES) se engancha aquí
   var S = {
     op: null, session: null, masterToken: null, ws: null, attempts: 0, reconnectTimer: null, closing: false,
     color: '#FFD400', effect: 'solid', strobeEnabled: false, maxHz: 3, tracker: DestelloPending.createTracker(), orders: DestelloOrders.createOrders(), maxStrobeMs: 30000, lastAccepted: null, lastStatsVersion: 0, latestVersion: 0, connected: false
@@ -42,6 +44,7 @@
   function logout(expired) {
     S.op = null; try { sessionStorage.removeItem('ds-op'); sessionStorage.removeItem('ds-sid'); } catch (e) { /* bloqueado */ }
     teardown(); show('loginView', true); show('setupView', false); show('control', false); show('logout', false); show('logoutAll', false); show('flashCard', false);
+    if (Hooks.onSetup) Hooks.onSetup(false); S.event = null; try { sessionStorage.removeItem('ds-evid'); } catch (e) { /* bloqueado */ }
     pill('status', '● sin sesión'); $('loginError').textContent = expired ? 'La sesión de operador venció. Ingresá de nuevo.' : '';
   }
   function teardown() {
@@ -54,11 +57,14 @@
   function enter() {
     show('loginView', false); show('logout', true); show('logoutAll', true); flashLoad();
     var sid = null; try { sid = sessionStorage.getItem('ds-sid'); } catch (e) { /* bloqueado */ }
+    var evid = null; try { evid = sessionStorage.getItem('ds-evid'); } catch (e) { /* bloqueado */ }
+    if (sid && evid && Hooks.operate) return Hooks.operate(evid).catch(function () { showSetup(); });
     if (sid) return resume(sid).catch(function () { showSetup(); });
     showSetup();
   }
   function showSetup() {
-    teardown(); show('setupView', true); show('control', false); pill('status', '● sin sesión');
+    teardown(); S.event = null; try { sessionStorage.removeItem('ds-evid'); } catch (e) { /* bloqueado */ }
+    show('setupView', true); show('control', false); pill('status', '● sin sesión'); if (Hooks.onSetup) Hooks.onSetup(true);
     api('GET', '/api/sessions').then(function (j) {
       var ul = $('sessionList'); ul.textContent = '';
       (j.sessions || []).forEach(function (s) {
@@ -72,7 +78,9 @@
     }).catch(function () { /* logout ya mostrado */ });
   }
   function adopt(d) {
-    S.closing = false;
+    S.closing = false; S.event = d.event || null;
+    try { if (S.event) sessionStorage.setItem('ds-evid', S.event.id); else sessionStorage.removeItem('ds-evid'); } catch (e) { /* bloqueado */ }
+    if (Hooks.onSetup) Hooks.onSetup(false); if (Hooks.onEnter) Hooks.onEnter(S.event);
     S.session = d.sessionId; S.masterToken = d.masterToken; S.strobeEnabled = !!d.strobeEnabled;
     try { sessionStorage.setItem('ds-sid', d.sessionId); } catch (e) { /* bloqueado */ }
     $('code').textContent = d.sessionId; $('url').textContent = d.joinUrl;
@@ -134,6 +142,7 @@
       if (S.closing) return;
       pill('status', '● sin conexión', 'bad'); $('hConn').textContent = 'sin conexión (' + ev.code + ')';
       if (ev.code === 4401) return resume(S.session).catch(function (e) { alertBox('bad', e.message, 'conn'); });          // token vencido o revocado: pedir uno nuevo
+      if (S.event && (ev.code === 4404 || ev.code === 4410)) { var e0 = S.event; S.closing = true; if (Hooks.onEventEnded) Hooks.onEventEnded(e0, ev.code); return; }   // el evento dejó de estar activo: no se recrea una sesión suelta con su código
       if (ev.code === 4404) return recreate();                                                                              // la sesión se perdió (p. ej. reinicio sin Redis)
       reconnect(ev.code === 1012 ? 500 + Math.random() * 3000 : null);
     };
@@ -331,10 +340,14 @@
     S.color = c; $('custom').value = c.toLowerCase(); $('colorHex').textContent = c;
     document.querySelectorAll('.color').forEach(function (x) { x.classList.toggle('active', x === btn); });
   }
-  PALETTE.forEach(function (c) {
-    var b = document.createElement('button'); b.type = 'button'; b.className = 'color'; b.style.background = c; b.title = c; b.setAttribute('aria-label', c);
-    b.addEventListener('click', function () { selectColor(c, b); }); $('colors').appendChild(b); if (c === S.color) b.classList.add('active');
-  });
+  function renderPalette() {
+    $('colors').textContent = '';
+    PALETTE.forEach(function (c) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'color'; b.style.background = c; b.title = c; b.setAttribute('aria-label', c);
+      b.addEventListener('click', function () { selectColor(c, b); }); $('colors').appendChild(b); if (c === S.color) b.classList.add('active');
+    });
+  }
+  renderPalette();
   $('custom').addEventListener('input', function (e) { var c = e.target.value.toUpperCase(); if (S.effect === 'sequence') { S.steps[S.seqSel].color = c; renderSeq(); return; } S.color = c; $('colorHex').textContent = c; document.querySelectorAll('.color').forEach(function (x) { x.classList.remove('active'); }); });
   document.querySelectorAll('[data-effect]').forEach(function (b) { b.addEventListener('click', function () { setEffect(b.getAttribute('data-effect')); }); });
   renderSeq();
@@ -417,6 +430,11 @@
 
   // Gancho para pruebas de navegador (solo lectura del estado interno).
   window.DestelloMaster = { tracker: S.tracker, orders: S.orders, state: S };
+  // V4.0: interfaz para events-panel.js (no expone el token de Master; el de operador solo lo usa api())
+  Hooks.api = api; Hooks.adopt = adopt; Hooks.alert = alertBox; Hooks.show = show; Hooks.teardown = teardown; Hooks.showSetup = showSetup;
+  Hooks.setPalette = function (colors) { PALETTE = colors && colors.length ? colors.slice() : DEFAULT_PALETTE.slice(); renderPalette(); };
+  Hooks.setSteps = function (steps, fadeMs) { S.steps = steps.map(function (s) { return { color: s.color, sec: s.holdMs / 1000 }; }); S.seqSel = 0; $('seqFadeMs').value = String(fadeMs || 0); renderSeq(); setEffect('sequence'); };
+  Hooks.setEffect = setEffect; Hooks.getEffect = function () { return S.effect; };
 
   if (S.op) enter();
 })();

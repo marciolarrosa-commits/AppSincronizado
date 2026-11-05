@@ -77,6 +77,10 @@ Las órdenes llevan `executeAt = serverTimestamp + lead` (lead configurable, ada
 estiman el reloj del servidor, programan la aplicación, descartan versiones ≤ la ya recibida y ante una reconexión reciben el estado **vigente** (no el historial).
 El estado vigente sobrevive a reinicios solo con Redis; sin Redis la sesión se pierde y el panel puede re-crearla con el mismo código (los teléfonos reintentan y la retoman).
 
+## Eventos (V4.0)
+
+Un **evento** es un registro del operador (almacenamiento compartido, sin vencimiento) que posee una sesión: su código público de 6 caracteres es el de la sesión, y la sala, el canal Redis, el estado, las versiones, la presencia y las confirmaciones ya eran por código, así que el aislamiento entre eventos es el de las sesiones. `src/events.js` añade el ciclo de vida (la sesión existe solo mientras el evento está activo), la validación, la auditoría y la política que el hub aplica a cada orden. El cierre de una sala llega a todas las instancias por el bus del evento (`{k:'close'}`). Detalle, API y límites en `EVENTOS.md`.
+
 ## Etapas de escalado
 
 | Etapa | Qué hay | Estado |

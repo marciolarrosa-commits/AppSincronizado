@@ -58,6 +58,14 @@ label{font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:4
 .st-ok{color:var(--ok)}.st-bad{color:var(--danger)}.st-warn{color:var(--warn)}.st-pending{color:var(--fg)}.st-muted{color:var(--muted)}
 ul.sessions{list-style:none;margin:10px 0 0;padding:0}
 ul.sessions li{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-family:ui-monospace,monospace}
+/* V4.0: eventos */
+.dash{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}.dash .num{font-size:34px;font-weight:750;line-height:1.1}.dash .num.sm{font-size:18px;padding-top:10px}
+.evlist{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}.evrow{display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}.evrow .nm{font-weight:650;flex:1;min-width:180px}.evrow .meta{color:var(--muted);font-size:13px}
+.evhead{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start}
+.evbanner{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;background:#10261d;border:1px solid #1d5a3b;border-radius:14px;padding:12px 16px;margin-bottom:18px}.evbn{font-size:22px;font-weight:750}
+.colorrow{display:flex;align-items:center;gap:4px}.colorrow input[type=color]{width:46px;height:38px;padding:0;background:transparent;border:0;cursor:pointer}.colorrow button{padding:4px 8px}
+textarea{box-sizing:border-box}input[type=datetime-local]{background:var(--card2);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:15px}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.78);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}.overlay-box{background:#fff;border-radius:18px;padding:20px;text-align:center;max-width:min(92vw,560px)}.overlay-box canvas,.overlay-box img{width:min(80vw,480px);height:auto;display:block;margin:10px auto}
 @media(max-width:800px){.grid{grid-template-columns:1fr}.wrap{padding:14px}.metric{font-size:42px}.colors{grid-template-columns:repeat(4,1fr)}}
 </style>
 </head>
@@ -87,15 +95,74 @@ ul.sessions li{display:flex;justify-content:space-between;align-items:center;pad
     <p id="loginError" class="small" style="color:var(--danger)"></p>
   </div>
 
+  <!-- V4.0) Eventos: varios espectáculos independientes, cada uno con su QR, configuración y operación aisladas -->
+  <div id="eventsView" class="hidden">
+    <div class="card" id="evDash" data-od-id="events-dashboard">
+      <h2>Panel general</h2>
+      <div class="dash">
+        <div><div class="muted small">EVENTOS</div><div class="num" id="dTotal">—</div></div>
+        <div><div class="muted small">ACTIVOS</div><div class="num" id="dActive">—</div></div>
+        <div><div class="muted small">CONECTADOS (TOTAL)</div><div class="num" id="dConnected">—</div></div>
+        <div><div class="muted small">INSTANCIAS</div><div class="num" id="dInstances">—</div></div>
+        <div><div class="muted small">ALMACENAMIENTO</div><div class="num sm" id="dStore">—</div></div>
+        <div><div class="muted small">SALUD</div><div class="num sm" id="dHealth">—</div></div>
+      </div>
+      <ul id="dAlerts" class="sessions" aria-live="polite"></ul>
+    </div>
+    <div class="card" id="evListCard" data-od-id="events-list">
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">Eventos</h2>
+        <div class="row"><label style="flex-direction:row;align-items:center;gap:6px"><input id="evArchived" type="checkbox"> Ver archivados</label>
+        <button id="evRefresh" class="btn" type="button">Actualizar</button><button id="evNew" class="btn primary" type="button">＋ Nuevo evento</button></div></div>
+      <ul id="evList" class="evlist"></ul>
+    </div>
+    <div class="card hidden" id="evDetail" data-od-id="event-detail">
+      <div class="evhead"><div><div class="muted small">EVENTO SELECCIONADO</div><h1 class="hero" id="evName" style="margin:2px 0 0">—</h1></div>
+        <div><span id="evStatus" class="pill">—</span> <button id="evClose" class="btn" type="button">Cerrar</button></div></div>
+      <div class="grid" style="margin-top:14px">
+        <section>
+          <div class="params">
+            <label>Nombre<input id="fName" type="text" maxlength="80"></label>
+            <label>Fecha y hora<input id="fStarts" type="datetime-local"></label>
+          </div>
+          <div class="params"><label style="grid-column:1/-1">Descripción (opcional)<input id="fDesc" type="text" maxlength="500"></label></div>
+          <h2 style="margin-top:16px">Colores</h2>
+          <div id="fColors" class="row"></div>
+          <div class="row" style="margin-top:8px"><button id="fAddColor" class="btn" type="button">＋ Color</button><span class="muted small">Hasta 12. Son la paleta del panel al operar este evento.</span></div>
+          <h2 style="margin-top:16px">Secuencias</h2>
+          <p class="muted small" style="margin:0 0 6px">Una por línea: <code>Nombre: #FF0000 3, #0000FF 3</code> (color y segundos; mínimo 2 pasos de 0,5 s o más).</p>
+          <textarea id="fSeq" rows="4" style="width:100%;background:var(--card2);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font:13px ui-monospace,monospace"></textarea>
+          <h2 style="margin-top:16px">Efectos permitidos y sincronización</h2>
+          <div id="fEffects" class="row"></div>
+          <div class="params"><label>Margen mínimo de sincronización (ms, vacío = predeterminado)<input id="fLead" type="number" min="300" max="8000" step="100"></label></div>
+          <div class="row" style="margin-top:14px"><button id="fSave" class="btn primary" type="button">Guardar cambios</button><span id="fMsg" class="small" role="status"></span></div>
+        </section>
+        <section>
+          <div class="qr" id="evQr"></div>
+          <div class="code" id="evCode" style="text-align:center;background:#fff;border-radius:0 0 14px 14px;margin-top:-6px;padding-bottom:10px">------</div>
+          <p id="evUrl" class="url"></p>
+          <div class="row"><button id="evCopy" class="btn" type="button">Copiar enlace</button><button id="evBig" class="btn" type="button">Ver QR</button><button id="evPng" class="btn" type="button">PNG</button><button id="evSvg" class="btn" type="button">SVG</button></div>
+          <h2 style="margin-top:18px">Operación</h2>
+          <div class="row" id="evActions"></div>
+          <h2 style="margin-top:18px">Estadísticas</h2>
+          <div class="kv"><b>Conectados</b><span id="sConn">—</span><b>Pico</b><span id="sPeak">—</span><b>Última orden</b><span id="sLast">—</span><b>Aplicada a tiempo</b><span id="sOnTime">—</span><b>Desviación</b><span id="sDev">—</span></div>
+          <h2 style="margin-top:18px">Registro de acciones</h2>
+          <ul id="evAudit" class="sessions small"></ul>
+        </section>
+      </div>
+    </div>
+    <div id="qrBig" class="overlay hidden" role="dialog" aria-label="QR del evento"><div class="overlay-box"><div id="qrBigName" style="color:#333;font-weight:650"></div><div id="qrBigImg"></div><div class="code" id="qrBigCode" style="text-align:center"></div><button id="qrBigClose" class="btn" type="button" style="margin-top:12px;color:#111">Cerrar</button></div></div>
+  </div>
+
   <!-- 2) Crear o retomar una sesión -->
   <div id="setupView" class="card hidden">
-    <h1 class="hero">Controlá las luces del público.</h1>
-    <p class="muted">Creá una sesión nueva y mostrale el QR a la tribuna, o retomá una sesión activa.</p>
+    <h1 class="hero">Sesiones sueltas</h1>
+    <p class="muted">Modo anterior, sin evento: creá una sesión nueva y mostrale el QR a la tribuna, o retomá una sesión activa. Para espectáculos con QR, fecha y configuración propios usá «Eventos».</p>
     <div class="row"><button id="create" class="btn primary" type="button">Crear sesión nueva</button><button id="refresh" class="btn" type="button">Actualizar lista</button></div>
     <ul id="sessionList" class="sessions"></ul>
   </div>
 
   <!-- 3) Control -->
+  <div id="eventBanner" class="evbanner hidden" data-od-id="event-banner"><div><span class="muted small">OPERANDO EL EVENTO</span><div class="evbn" id="ebName">—</div></div><div class="row"><span class="pill" id="ebCode">—</span><button id="ebBack" class="btn" type="button">← Volver a eventos</button></div></div>
   <div id="control" class="grid hidden">
     <section>
       <div class="card">
@@ -138,6 +205,7 @@ ul.sessions li{display:flex;justify-content:space-between;align-items:center;pad
         <div id="pSeq" class="hidden" style="margin-top:14px">
           <p class="muted small" style="margin:0 0 6px">Cada color se muestra los segundos que indiques; al llegar al último vuelve al primero y <strong>se repite sin parar hasta que pulses DETENER TODO</strong> (o hasta la duración total que fijes). Para asignar un color, tocá una fila y elegí uno de la paleta de arriba o del selector de la fila.</p>
           <ol id="seqList" class="seq-list" aria-label="Colores de la secuencia"></ol>
+          <div id="seqPresets" class="row hidden" style="margin-bottom:8px"></div>
           <div class="row"><button id="seqAdd" class="btn" type="button">＋ Agregar color</button><span id="seqSummary" class="muted small" aria-live="polite"></span></div>
           <div class="params">
             <label>Transición entre colores (ms; 0 = corte seco)<input id="seqFadeMs" type="number" min="0" max="10000" step="100" value="0"></label>
@@ -217,6 +285,7 @@ ul.sessions li{display:flex;justify-content:space-between;align-items:center;pad
 <script src="/js/qrcode.js"></script>
 <script src="/js/pending.js"></script>
 <script src="/js/orders.js"></script>
+<script src="/js/events-panel.js"></script>
 <script src="/js/master.js"></script>
 </body>
 </html>

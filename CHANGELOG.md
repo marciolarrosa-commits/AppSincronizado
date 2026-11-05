@@ -6,6 +6,13 @@ Formato: `MAYOR.MENOR.PARCHE` — **mayor** = rompe el protocolo o el formato de
 
 <!-- release:next -->
 
+## [4.0.0] — 2026-11-05
+
+- Sistema multi-evento: eventos independientes con QR propio (/e/CODIGO, PNG/SVG), configuración de colores/secuencias/efectos, ciclo de vida, auditoría, archivado lógico, panel general y aislamiento por sala/canal/token con política validada en el servidor.
+- Ráfaga inicial de reloj repartida: 3 pings con jitter en 3 s (1 al reconectar) en lugar de 6 cada 120 ms; pico simulado de 600000 a 61390 pings/s (+4 ms p95 de error en el modelo).
+- Cambio de comportamiento: STROBE_ALLOWED=false por defecto (antes true).
+- Cierre de salas por el bus (4404 desactivado, 4410 terminado), registro de instancias vivas, pruebas con Redis real y 2 instancias, E2E en Chrome, simulación tools/reloj-rafaga.js. No demostrado: 60000 conexiones, MFA y permisos por evento (ver docs/INFORME_V4.0.0.md).
+
 ## [3.5.0] — 2026-10-12
 
 - Auditoría y remediación de ciberseguridad (informe en docs/INFORME_V3.5.0.md): ioredis 5.11.1 → 6.0.0 con protocolo RESP2 fijado; límites de frecuencia compartidos entre instancias (Redis, atómicos, con respaldo local si Redis falla); tokens con reclamaciones estrictas, revocación (POST /api/master/logout, «Salir en todos») y huella de contraseña; TOKEN_SECRET validado y derivación scrypt; login con application/json, Sec-Fetch-Site y tiempo igual; URL pública canónica obligatoria en producción y origen sin Host; redirección https; datos de Redis validados; registros depurados por valor; empaquetado de releases con lista permitida, denegación y escaneo de secretos.
